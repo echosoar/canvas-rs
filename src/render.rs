@@ -307,17 +307,65 @@ pub fn stroke_polyline(
         }
         return;
     }
+
+    // Draw all segments using Butt caps for the segment body so that
+    // interior joints never get incorrect cap geometry.  Endpoint caps are
+    // added separately below.
     for i in 0..pts.len() - 1 {
         let (x0, y0) = pts[i];
         let (x1, y1) = pts[i + 1];
-        // Only apply end caps to the very first and last segment of the polyline.
-        let seg_cap = if i == 0 || i == pts.len() - 2 {
-            cap
-        } else {
-            LineCap::Butt
-        };
-        draw_thick_line(buf, width, height, x0, y0, x1, y1, color, line_width, seg_cap, clip);
+        draw_thick_line(buf, width, height, x0, y0, x1, y1, color, line_width, LineCap::Butt, clip);
     }
+
+    // Add the requested cap to the true start and end of the polyline.
+    let hw = line_width / 2.0;
+    match cap {
+        LineCap::Butt => {} // butt caps are flush with the body; nothing extra.
+        LineCap::Round => {
+            fill_disc(buf, width, height, pts[0].0, pts[0].1, hw, color, clip);
+            let last = *pts.last().unwrap();
+            fill_disc(buf, width, height, last.0, last.1, hw, color, clip);
+        }
+        LineCap::Square => {
+            // Square cap: extend a square beyond each endpoint in the
+            // direction of the adjacent segment.
+            add_square_cap(buf, width, height, pts[0], pts[1], hw, color, clip, true);
+            let n = pts.len();
+            add_square_cap(buf, width, height, pts[n - 1], pts[n - 2], hw, color, clip, true);
+        }
+    }
+}
+
+/// Add a square cap at `tip`, extending away from `neighbour`.
+fn add_square_cap(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    tip: (f64, f64),
+    neighbour: (f64, f64),
+    hw: f64,
+    color: Color,
+    clip: &Option<Vec<bool>>,
+    _outward: bool,
+) {
+    let dx = tip.0 - neighbour.0;
+    let dy = tip.1 - neighbour.1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return;
+    }
+    let ux = dx / len;  // unit vector tip→outward
+    let uy = dy / len;
+    let nx = -uy;       // unit perpendicular
+    let ny = ux;
+    // Rectangle from the tip outward by hw.
+    let corners = [
+        (tip.0 + nx * hw, tip.1 + ny * hw),
+        (tip.0 - nx * hw, tip.1 - ny * hw),
+        (tip.0 - nx * hw + ux * hw, tip.1 - ny * hw + uy * hw),
+        (tip.0 + nx * hw + ux * hw, tip.1 + ny * hw + uy * hw),
+    ];
+    fill_polygon(buf, width, height, &corners, color, clip);
 }
 
 /// Fill a closed sub-path (list of points) using the scanline algorithm.
