@@ -1,4 +1,4 @@
-use canvas_rs::{Canvas, Color, ImageData};
+use canvas::{Canvas, Color, ImageData};
 use std::f64::consts::PI;
 
 // ── Canvas creation ──────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ fn get_context_unknown_returns_none() {
 #[test]
 fn to_data_url_starts_with_correct_prefix() {
     let canvas = Canvas::new(8, 8);
-    let url = canvas.to_data_url();
+    let url = images::to_data_url(&canvas);
     assert!(
         url.starts_with("data:image/png;base64,"),
         "URL should start with data:image/png;base64,"
@@ -45,23 +45,24 @@ fn to_data_url_starts_with_correct_prefix() {
 }
 
 #[test]
-fn to_data_url_with_options_respects_type() {
-    let canvas = Canvas::new(4, 4);
-    let url = canvas.to_data_url_with_options("image/png", 1.0);
-    assert!(url.starts_with("data:image/png;base64,"));
-}
-
-#[test]
 fn to_data_url_png_header_valid() {
     let canvas = Canvas::new(2, 2);
-    let url = canvas.to_data_url();
+    let url = images::to_data_url(&canvas);
     let b64 = url.strip_prefix("data:image/png;base64,").unwrap();
-    // Decode first few bytes manually to check the PNG signature.
     // PNG signature in base64 starts with "iVBOR".
     assert!(
         b64.starts_with("iVBOR"),
         "base64 should start with PNG magic (iVBOR…)"
     );
+}
+
+// ── to_blob ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn to_blob_is_valid_png() {
+    let canvas = Canvas::new(4, 4);
+    let bytes = images::to_blob(&canvas);
+    assert_eq!(&bytes[..8], &[137, 80, 78, 71, 13, 10, 26, 10], "to_blob should return a valid PNG");
 }
 
 // ── fillStyle / strokeStyle properties ───────────────────────────────────────
@@ -454,7 +455,7 @@ fn alpha_blending_on_fill_rect() {
 
 #[test]
 fn color_hex_short() {
-    use canvas_rs::color::parse_color;
+    use canvas::color::parse_color;
     assert_eq!(parse_color("#f00"), Some(Color::rgb(255, 0, 0)));
     assert_eq!(parse_color("#0f0"), Some(Color::rgb(0, 255, 0)));
     assert_eq!(parse_color("#00f"), Some(Color::rgb(0, 0, 255)));
@@ -462,13 +463,13 @@ fn color_hex_short() {
 
 #[test]
 fn color_hex_long() {
-    use canvas_rs::color::parse_color;
+    use canvas::color::parse_color;
     assert_eq!(parse_color("#ff0000"), Some(Color::rgb(255, 0, 0)));
 }
 
 #[test]
 fn color_named_all_common() {
-    use canvas_rs::color::parse_color;
+    use canvas::color::parse_color;
     let colors = ["red","green","blue","white","black","transparent",
                   "yellow","cyan","magenta","orange","purple","pink",
                   "gray","silver","lime","navy","teal","coral","gold"];
@@ -481,46 +482,38 @@ fn color_named_all_common() {
 
 #[test]
 fn png_encode_nonempty() {
-    use canvas_rs::png::encode_png;
+    use images::encode_png;
     let pixels = vec![255u8, 0, 0, 255, 0, 255, 0, 255]; // 2×1 (red, green)
     let png = encode_png(2, 1, &pixels);
     // Must start with PNG signature.
     assert_eq!(&png[..8], &[137, 80, 78, 71, 13, 10, 26, 10]);
-    // Must contain the IEND tag (4 bytes length=0, then "IEND", then 4-byte CRC).
-    // Find "IEND" in the file.
+    // Must contain the IEND tag.
     let has_iend = png.windows(4).any(|w| w == b"IEND");
     assert!(has_iend, "PNG should contain IEND chunk");
 }
 
 #[test]
 fn base64_round_trip() {
-    use canvas_rs::png::base64_encode;
+    use images::base64_encode;
     let original = b"Hello, World!";
     let encoded = base64_encode(original);
     assert_eq!(encoded, "SGVsbG8sIFdvcmxkIQ==");
 }
 
-// ── fill_rect + draw image from file ─────────────────────────────────────────
+// ── from_png (PNG decoding) ───────────────────────────────────────────────────
 
-/// Decode a PNG file from `path` and return it as an `ImageData` (RGBA).
-fn load_png_rgba(path: &str) -> ImageData {
-    let file = std::fs::File::open(path).expect("could not open PNG file");
-    let decoder = png::Decoder::new(file);
-    let mut reader = decoder.read_info().expect("could not read PNG info");
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    let frame = reader.next_frame(&mut buf).expect("could not decode PNG frame");
-    let bytes = buf[..frame.buffer_size()].to_vec();
-    let (w, h) = (frame.width, frame.height);
-    let rgba = match frame.color_type {
-        png::ColorType::Rgba => bytes,
-        png::ColorType::Rgb => bytes
-            .chunks(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255u8])
-            .collect(),
-        _ => panic!("unsupported PNG color type: {:?}", frame.color_type),
-    };
-    ImageData::from_rgba(w, h, rgba)
+#[test]
+fn from_png_roundtrip() {
+    // Encode a canvas, then decode it back and check dimensions.
+    let canvas = Canvas::new(8, 8);
+    let png_bytes = images::to_blob(&canvas);
+    let img = images::from_png(&png_bytes).expect("round-trip PNG decode should succeed");
+    assert_eq!(img.width, 8);
+    assert_eq!(img.height, 8);
+    assert_eq!(img.data.len(), 8 * 8 * 4);
 }
+
+// ── fill_rect + draw image from file ─────────────────────────────────────────
 
 #[test]
 fn fill_rect_green_then_draw_image() {
@@ -543,8 +536,9 @@ fn fill_rect_green_then_draw_image() {
     let outside_snap = snapshot.get_pixel(5, 5);
     assert_eq!(outside_snap.a, 0, "pixel outside rect should be transparent before image draw");
 
-    // Load tests/image_220x200.png and draw it on top of the canvas.
-    let img_data = load_png_rgba("tests/image_220x200.png");
+    // Load tests/image_220x200.png using images::from_png and draw it on top.
+    let png_bytes = std::fs::read("tests/image_220x200.png").expect("could not read PNG file");
+    let img_data = images::from_png(&png_bytes).expect("could not decode PNG");
     assert_eq!(img_data.width,  220, "loaded image width should be 220");
     assert_eq!(img_data.height, 200, "loaded image height should be 200");
     ctx.draw_image(&img_data, 0.0, 0.0);
@@ -556,6 +550,6 @@ fn fill_rect_green_then_draw_image() {
     assert_eq!(far_px.a, 0, "pixel outside image and rect should remain transparent");
 
     // The canvas should export to a valid PNG data URL without panicking.
-    let url = canvas.to_data_url();
+    let url = images::to_data_url(&canvas);
     assert!(url.starts_with("data:image/png;base64,"), "export should produce a valid PNG data URL");
 }
