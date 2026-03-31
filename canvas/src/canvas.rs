@@ -4,7 +4,6 @@ use std::rc::Rc;
 use crate::color::{parse_color, Color};
 use crate::image::ImageData;
 use crate::path::{Path, PathCommand};
-use crate::png::{base64_encode, encode_png};
 use crate::render::{self, LineCap};
 
 // ── Canvas ───────────────────────────────────────────────────────────────────
@@ -12,13 +11,12 @@ use crate::render::{self, LineCap};
 /// A 2-D drawing surface, analogous to the HTML `<canvas>` element.
 ///
 /// ```
-/// use canvas_rs::Canvas;
+/// use canvas::Canvas;
 ///
 /// let canvas = Canvas::new(100, 100);
 /// let mut ctx = canvas.get_context("2d").unwrap();
 /// ctx.set_fill_style("red");
 /// ctx.fill_rect(0.0, 0.0, 100.0, 100.0);
-/// let _url = canvas.to_data_url();
 /// ```
 pub struct Canvas {
     pub(crate) width: u32,
@@ -56,25 +54,6 @@ impl Canvas {
         })
     }
 
-    /// Encode the canvas contents as a `data:image/png;base64,...` URL.
-    ///
-    /// The optional `type_` parameter is accepted for API compatibility but
-    /// only `"image/png"` is supported.  The `quality` parameter is ignored
-    /// for PNG.
-    pub fn to_data_url(&self) -> String {
-        self.to_data_url_with_options("image/png", 1.0)
-    }
-
-    pub fn to_data_url_with_type(&self, type_: &str) -> String {
-        self.to_data_url_with_options(type_, 1.0)
-    }
-
-    pub fn to_data_url_with_options(&self, _type_: &str, _quality: f64) -> String {
-        let buf = self.buffer.borrow();
-        let png = encode_png(self.width, self.height, &buf);
-        format!("data:image/png;base64,{}", base64_encode(&png))
-    }
-
     /// Return the canvas width in pixels.
     pub fn width(&self) -> u32 {
         self.width
@@ -88,6 +67,11 @@ impl Canvas {
     /// Read a copy of the raw RGBA pixel buffer.
     pub fn get_image_data(&self) -> ImageData {
         ImageData::from_rgba(self.width, self.height, self.buffer.borrow().clone())
+    }
+
+    /// Borrow the raw RGBA pixel buffer.
+    pub fn pixels(&self) -> std::cell::Ref<'_, Vec<u8>> {
+        self.buffer.borrow()
     }
 }
 

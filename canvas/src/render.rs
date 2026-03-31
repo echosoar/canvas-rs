@@ -25,10 +25,10 @@ pub fn put_pixel(
         return;
     }
     let idx = (y as u32 * width + x as u32) as usize;
-    if let Some(mask) = clip
-        && !mask[idx]
-    {
-        return;
+    if let Some(mask) = clip {
+        if !mask[idx] {
+            return;
+        }
     }
     let base = idx * 4;
     let dst = Color::rgba(buf[base], buf[base + 1], buf[base + 2], buf[base + 3]);

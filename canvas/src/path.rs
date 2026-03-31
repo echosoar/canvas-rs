@@ -77,10 +77,10 @@ impl Path {
                     }
                     current.clear();
                     // pen stays at the start of the closed sub-path (web spec)
-                    if let Some(sp) = sub_paths.last()
-                        && let Some(&p) = sp.first()
-                    {
-                        pen = p;
+                    if let Some(sp) = sub_paths.last() {
+                        if let Some(&p) = sp.first() {
+                            pen = p;
+                        }
                     }
                 }
             }

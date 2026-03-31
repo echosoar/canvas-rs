@@ -1,0 +1,8 @@
+[package]
+name = "images"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+canvas = { path = "../canvas" }
+png = "0.17"
