@@ -553,3 +553,42 @@ fn fill_rect_green_then_draw_image() {
     let url = images::to_data_url(&canvas);
     assert!(url.starts_with("data:image/png;base64,"), "export should produce a valid PNG data URL");
 }
+
+// ── font test ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn font_render_three_lines_with_nested_rects() {
+    let canvas = Canvas::new(1080, 200);
+    let mut ctx = canvas.get_context("2d").unwrap();
+
+    let png_bytes = std::fs::read("tests/image_220x200.png").expect("could not read PNG file");
+    let img_data = images::from_png(&png_bytes).expect("could not decode PNG");
+    ctx.draw_image(&img_data, 860.0, 0.0);
+
+    // Draw text inside the rects (30px from edge)
+    ctx.set_fill_style("black");
+    ctx.set_font("32px common");
+
+    // Line 1: Chinese
+    ctx.fill_text("让天下没有难生成的图。", 20.0, 50.0);
+
+    // Line 2: English
+    ctx.set_fill_style("red");
+    ctx.fill_text("Make it so that no graph is difficult to generate.", 20.0, 90.0);
+
+    // Line 3: Date
+    ctx.set_fill_style("blue");
+    ctx.set_font("16px common");
+    ctx.fill_text("--- 2026.03.15", 20.0, 130.0);
+
+    // Generate base64 PNG data URL
+    let url = images::to_data_url(&canvas);
+    assert!(url.starts_with("data:image/png;base64,"), "font test should produce a valid PNG data URL");
+
+    // Verify the PNG is valid by decoding from blob
+    let png_bytes = images::to_blob(&canvas);
+    let decoded = images::from_png(&png_bytes).expect("decoded PNG should be valid");
+    assert_eq!(decoded.width, 1080);
+    assert_eq!(decoded.height, 200);
+    println!("Generated PNG data URL:\n{}", url);
+}

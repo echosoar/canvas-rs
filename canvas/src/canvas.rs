@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::color::{parse_color, Color};
+use crate::font::Font;
 use crate::image::ImageData;
 use crate::path::{Path, PathCommand};
 use crate::render::{self, LineCap};
@@ -41,6 +42,8 @@ impl Canvas {
         if context_type != "2d" {
             return None;
         }
+        // Load common font as fallback
+        let common_font = Font::load("common").ok();
         Some(Context2D {
             buffer: Rc::clone(&self.buffer),
             width: self.width,
@@ -51,6 +54,12 @@ impl Canvas {
             line_cap: LineCap::Butt,
             path: Path::new(),
             clip: None,
+            font: None,
+            common_font,
+            font_size: 32,
+            font_family: "common".to_string(),
+            font_style: String::new(),
+            font_string: "32px common".to_string(),
         })
     }
 
@@ -90,6 +99,14 @@ pub struct Context2D {
     line_cap: LineCap,
     path: Path,
     clip: Option<Vec<bool>>,
+
+    // ── Font ───────────────────────────────────────────────────
+    font: Option<Font>,
+    common_font: Option<Font>,  // Fallback font for characters not in main font
+    font_size: u32,
+    font_family: String,
+    font_style: String,  // bold, italic, etc.
+    font_string: String, // original font string like "bold 48px serif"
 }
 
 // ─── Property accessors ───────────────────────────────────────────────────────
@@ -146,6 +163,35 @@ impl Context2D {
 
     pub fn line_cap(&self) -> &'static str {
         self.line_cap.as_str()
+    }
+
+    // font
+
+    /// Set the font using CSS font string format: `"bold 48px serif"`.
+    ///
+    /// Parses the font string to extract font size and family name.
+    /// The font file should be in the lib directory as `{family}.txt`.
+    /// Invalid strings are silently ignored.
+    pub fn set_font(&mut self, font_str: &str) {
+        if let Some((size, family, style)) = parse_font_string(font_str) {
+            self.font_size = size;
+            self.font_family = family;
+            self.font_style = style;
+            self.font_string = font_str.to_string();
+            self.font = None; // Clear cached font, will load on first use
+        }
+    }
+
+    /// Return the current font string like `"bold 48px serif"`.
+    pub fn font(&self) -> &str {
+        &self.font_string
+    }
+
+    /// Load the font if not already loaded.
+    fn ensure_font_loaded(&mut self) {
+        if self.font.is_none() {
+            self.font = Font::load(&self.font_family).ok();
+        }
     }
 }
 
@@ -336,8 +382,198 @@ impl Context2D {
     }
 }
 
+// ─── Text methods ─────────────────────────────────────────────────────────────
+
+impl Context2D {
+    /// Fill text at position `(x, y)` using the current `fillStyle` and font settings.
+    ///
+    /// The text is rendered using the loaded font bitmap, scaled to the current
+    /// `font_size`. Characters not found in the font will fallback to common font.
+    pub fn fill_text(&mut self, text: &str, x: f64, y: f64) {
+        println!("fill_text: '{}' at ({}, {}) with font '{}'", text, x, y, self.font_string);
+        self.ensure_font_loaded();
+
+        // Determine which font to use as primary, and common_font as fallback
+        let primary_font = self.font.as_ref().or(self.common_font.as_ref());
+
+        println!("Primary font: {:?}, Common font: {:?}", primary_font.as_ref().map(|f| &f.config), self.common_font.as_ref().map(|f| &f.config));
+        if primary_font.is_none() {
+            return;
+        }
+
+        let primary_font = primary_font.unwrap();
+        let color = self.fill_style;
+        let font_size = self.font_size;
+
+        // Calculate scale
+        let scale = font_size as f64 / primary_font.config.size as f64;
+        let scaled_height = (primary_font.config.size as f64 * scale).ceil() as u32;
+
+        let mut x_offset = x;
+
+        // Render each character with fallback
+        for ch in text.chars() {
+            // Try primary font first, then fallback to common_font
+            let char_bitmap = primary_font.get_char(ch)
+                .or_else(|| self.common_font.as_ref().and_then(|f| f.get_char(ch)));
+
+            if let Some(char_bm) = char_bitmap {
+                let scaled_width = (char_bm.width as f64 * scale).ceil() as usize;
+
+                // Draw the character
+                let mut buf = self.buffer.borrow_mut();
+                for dst_y in 0..scaled_height as usize {
+                    for dst_x in 0..scaled_width {
+                        let src_x = (dst_x as f64 / scale).round() as usize;
+                        let src_y = (dst_y as f64 / scale).round() as usize;
+
+                        if src_x < char_bm.width as usize && src_y < char_bm.height as usize {
+                            if char_bm.bitmap[src_y][src_x] {
+                                let px = x_offset as i64 + dst_x as i64;
+                                let py = y as i64 + dst_y as i64;
+                                render::put_pixel(
+                                    &mut buf,
+                                    self.width,
+                                    self.height,
+                                    px,
+                                    py,
+                                    color,
+                                    &self.clip,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                x_offset += scaled_width as f64;
+            } else if ch == ' ' {
+                // Space character not in font: default to half-width (size/2)
+                let half_width = primary_font.config.size / 2;
+                let scaled_width = (half_width as f64 * scale).ceil() as f64;
+                x_offset += scaled_width;
+            }
+        }
+    }
+
+    /// Fill text with maximum width constraint.
+    /// If the text is wider than max_width, it will be scaled down to fit.
+    /// Characters not found in the font will fallback to common font.
+    pub fn fill_text_with_max_width(&mut self, text: &str, x: f64, y: f64, max_width: f64) {
+        self.ensure_font_loaded();
+
+        // Determine which font to use as primary, and common_font as fallback
+        let primary_font = self.font.as_ref().or(self.common_font.as_ref());
+        if primary_font.is_none() {
+            return;
+        }
+
+        let primary_font = primary_font.unwrap();
+        let (bitmap, original_width, _) = primary_font.render_text_with_fallback(
+            text,
+            self.font_size,
+            self.common_font.as_ref(),
+        );
+
+        if bitmap.is_empty() || original_width == 0 {
+            return;
+        }
+
+        // Calculate scale factor if text exceeds max_width
+        let scale = if original_width as f64 > max_width {
+            max_width / original_width as f64
+        } else {
+            1.0
+        };
+
+        let color = self.fill_style;
+        let scaled_height = (bitmap.len() as f64 * scale).ceil() as usize;
+        let scaled_width = (bitmap[0].len() as f64 * scale).ceil() as usize;
+
+        // Draw scaled text
+        let mut buf = self.buffer.borrow_mut();
+        for dst_y in 0..scaled_height {
+            for dst_x in 0..scaled_width {
+                // Nearest neighbor sampling
+                let src_x = (dst_x as f64 / scale).round() as usize;
+                let src_y = (dst_y as f64 / scale).round() as usize;
+
+                if src_y < bitmap.len() && src_x < bitmap[src_y].len() && bitmap[src_y][src_x] {
+                    let px = x as i64 + dst_x as i64;
+                    let py = y as i64 + dst_y as i64;
+                    render::put_pixel(
+                        &mut buf,
+                        self.width,
+                        self.height,
+                        px,
+                        py,
+                        color,
+                        &self.clip,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Measure text width with current font settings.
+    /// Returns the width in pixels.
+    /// Characters not found in the font will fallback to common font.
+    pub fn measure_text(&self, text: &str) -> f64 {
+        // Need to temporarily load font for measurement
+        let font = Font::load(&self.font_family).ok();
+        let common_font = Font::load("common").ok();
+
+        let primary_font = font.as_ref().or(common_font.as_ref());
+        if let Some(font) = primary_font {
+            let (_, width, _) = font.render_text_with_fallback(
+                text,
+                self.font_size,
+                common_font.as_ref(),
+            );
+            width as f64
+        } else {
+            0.0
+        }
+    }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn color_to_css(c: Color) -> String {
     format!("rgba({},{},{},{})", c.r, c.g, c.b, c.a as f64 / 255.0)
+}
+
+/// Parse CSS font string like "bold 48px serif".
+/// Returns (size, family, style) where style is "bold", "italic", etc.
+fn parse_font_string(font_str: &str) -> Option<(u32, String, String)> {
+    let parts: Vec<&str> = font_str.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut size = 32u32;  // default size
+    let mut family = "common".to_string();  // default family
+    let mut style = String::new();
+
+    for part in parts {
+        // Check for size (e.g., "48px")
+        if part.ends_with("px") {
+            let size_str = part.trim_end_matches("px");
+            if let Ok(s) = size_str.parse::<u32>() {
+                size = s;
+            }
+        }
+        // Check for style keywords
+        else if part == "bold" || part == "italic" || part == "normal" {
+            if !style.is_empty() {
+                style.push(' ');
+            }
+            style.push_str(part);
+        }
+        // Last non-size, non-style part is the family
+        else {
+            family = part.to_string();
+        }
+    }
+
+    Some((size, family, style))
 }

@@ -26,11 +26,13 @@
 
 pub mod canvas;
 pub mod color;
+pub mod font;
 pub mod image;
 pub mod path;
 pub mod render;
 
-pub use canvas::{Canvas, Context2D};
-pub use color::Color;
-pub use image::ImageData;
-pub use render::LineCap;
+pub use crate::canvas::{Canvas, Context2D};
+pub use crate::color::Color;
+pub use crate::font::{Font, FontConfig, FontWidth};
+pub use crate::image::ImageData;
+pub use crate::render::LineCap;
