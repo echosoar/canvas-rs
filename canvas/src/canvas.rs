@@ -390,13 +390,13 @@ impl Context2D {
     /// The text is rendered using the loaded font bitmap, scaled to the current
     /// `font_size`. Characters not found in the font will fallback to common font.
     pub fn fill_text(&mut self, text: &str, x: f64, y: f64) {
-        println!("fill_text: '{}' at ({}, {}) with font '{}'", text, x, y, self.font_string);
+        // println!("fill_text: '{}' at ({}, {}) with font '{}'", text, x, y, self.font_string);
         self.ensure_font_loaded();
 
         // Determine which font to use as primary, and common_font as fallback
         let primary_font = self.font.as_ref().or(self.common_font.as_ref());
 
-        println!("Primary font: {:?}, Common font: {:?}", primary_font.as_ref().map(|f| &f.config), self.common_font.as_ref().map(|f| &f.config));
+        // println!("Primary font: {:?}, Common font: {:?}", primary_font.as_ref().map(|f| &f.config), self.common_font.as_ref().map(|f| &f.config));
         if primary_font.is_none() {
             return;
         }

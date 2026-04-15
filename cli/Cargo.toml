@@ -1,0 +1,12 @@
+[package]
+name = "canvas-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "canvas-cli"
+path = "src/main.rs"
+
+[dependencies]
+canvas = { path = "../canvas" }
+images = { path = "../images" }

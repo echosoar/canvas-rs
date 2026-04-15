@@ -3,8 +3,37 @@ pure rust implemented drawer library( api like canvas), and no dependencies, sup
 
 ![](./test/cover.png)
 
+## Use Cli
+```sh
+# Draw from input.txt and save to output.png
+canvas-cli --input=input.txt --output=output.png
 
-## Usage
+# Draw from input string and save to output.png
+canvas-cli --input="canvas 1080 200; [operation] [args...]" --output=output.png
+
+# Draw from input string and output base64 PNG data URL to stdout
+canvas-cli --input="canvas 1080 200; [operation] [args...]" --output-data-url
+```
+
+#### input.txt format
+1. canvas [width] [height]
+2. [operation] [args...]
+
+input.txt example:
+```txt
+canvas 1080 200
+draw_image ../images/tests/image_220x200.png 860 0
+set_fill_style black
+set_font 32px common
+fill_text "让天下没有难生成的图。" 20 50
+set_fill_style red
+fill_text "Make it so that no graph is difficult to generate." 20 90
+set_fill_style blue
+set_font 16px common
+fill_text "--- 2026.03.15" 20 130
+```
+
+## Use in Rust Code
 
 ```rust
 use canvas_rs::Canvas;
@@ -40,4 +69,10 @@ func main() {
 }
 
 
+```
+
+## Development
+
+```
+cargo run --bin canvas-cli -- --draw --input=./test/input.txt --output=output.png
 ```
