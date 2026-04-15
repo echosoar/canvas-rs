@@ -1,4 +1,5 @@
-use canvas::Canvas;
+use canvas::{Canvas, LinearGradient, RadialGradient};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -35,6 +36,15 @@ fn print_usage() {
     println!("  close_path                        - Close the current path");
     println!("  fill                              - Fill the current path");
     println!("  stroke                            - Stroke the current path");
+    println!("  save                              - Save current state");
+    println!("  restore                           - Restore saved state");
+    println!();
+    println!("Gradients:");
+    println!("  create_linear_gradient <id> <x0> <y0> <x1> <y1>  - Create linear gradient");
+    println!("  create_radial_gradient <id> <x0> <y0> <r0> <x1> <y1> <r1> - Create radial gradient");
+    println!("  add_color_stop <gradient_id> <offset> <color>    - Add color stop to gradient");
+    println!("  set_fill_gradient <gradient_id>                  - Set fill style to gradient");
+    println!("  set_stroke_gradient <gradient_id>                - Set stroke style to gradient");
 }
 
 fn parse_args(args: &[String]) -> (Option<String>, Option<String>, bool) {
@@ -83,10 +93,19 @@ fn parse_quoted_string(s: &str) -> (String, usize) {
     }
 }
 
+/// Stores either a linear or radial gradient
+enum Gradient {
+    Linear(LinearGradient),
+    Radial(RadialGradient),
+}
+
 fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path: &Path) {
+    // Store gradients by ID
+    let mut gradients: HashMap<String, Gradient> = HashMap::new();
+
     for cmd in commands {
         let cmd = cmd.trim();
-        if cmd.is_empty() {
+        if cmd.is_empty() || cmd.starts_with('#') {
             continue;
         }
 
@@ -211,6 +230,77 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
             }
             "stroke" => {
                 ctx.stroke();
+            }
+            "save" => {
+                ctx.save();
+            }
+            "restore" => {
+                ctx.restore();
+            }
+            "create_linear_gradient" => {
+                if parts.len() >= 6 {
+                    let id = parts[1];
+                    let x0 = parse_float(parts[2]);
+                    let y0 = parse_float(parts[3]);
+                    let x1 = parse_float(parts[4]);
+                    let y1 = parse_float(parts[5]);
+                    let gradient = ctx.create_linear_gradient(x0, y0, x1, y1);
+                    gradients.insert(id.to_string(), Gradient::Linear(gradient));
+                }
+            }
+            "create_radial_gradient" => {
+                if parts.len() >= 8 {
+                    let id = parts[1];
+                    let x0 = parse_float(parts[2]);
+                    let y0 = parse_float(parts[3]);
+                    let r0 = parse_float(parts[4]);
+                    let x1 = parse_float(parts[5]);
+                    let y1 = parse_float(parts[6]);
+                    let r1 = parse_float(parts[7]);
+                    let gradient = ctx.create_radial_gradient(x0, y0, r0, x1, y1, r1);
+                    gradients.insert(id.to_string(), Gradient::Radial(gradient));
+                }
+            }
+            "add_color_stop" => {
+                if parts.len() >= 4 {
+                    let id = parts[1];
+                    let offset = parse_float(parts[2]);
+                    let color = parts[3];
+                    if let Some(gradient) = gradients.get_mut(id) {
+                        match gradient {
+                            Gradient::Linear(g) => g.add_color_stop(offset, color),
+                            Gradient::Radial(g) => g.add_color_stop(offset, color),
+                        }
+                    } else {
+                        eprintln!("Warning: Gradient '{}' not found", id);
+                    }
+                }
+            }
+            "set_fill_gradient" => {
+                if parts.len() >= 2 {
+                    let id = parts[1];
+                    if let Some(gradient) = gradients.get(id) {
+                        match gradient {
+                            Gradient::Linear(g) => ctx.set_fill_style_gradient(g),
+                            Gradient::Radial(g) => ctx.set_fill_style_radial_gradient(g),
+                        }
+                    } else {
+                        eprintln!("Warning: Gradient '{}' not found", id);
+                    }
+                }
+            }
+            "set_stroke_gradient" => {
+                if parts.len() >= 2 {
+                    let id = parts[1];
+                    if let Some(gradient) = gradients.get(id) {
+                        match gradient {
+                            Gradient::Linear(g) => ctx.set_stroke_style_gradient(g),
+                            Gradient::Radial(g) => ctx.set_stroke_style_radial_gradient(g),
+                        }
+                    } else {
+                        eprintln!("Warning: Gradient '{}' not found", id);
+                    }
+                }
             }
             _ => {
                 eprintln!("Warning: Unknown operation: {}", op);

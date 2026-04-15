@@ -1,4 +1,21 @@
 canvas 1080 200
+# 左边一半背景 - 径向渐变 (从中心向外)
+create_radial_gradient radial_bg 270 100 0 270 100 200
+add_color_stop radial_bg 0 white
+add_color_stop radial_bg 0.5 #fded43
+add_color_stop radial_bg 1 #a1cffd
+set_fill_gradient radial_bg
+fill_rect 0 0 540 200
+
+# 右边一半背景 - 线性渐变 (从左到右)
+create_linear_gradient linear_bg 600 0 1080 0
+add_color_stop linear_bg 0 #c3c3c3
+add_color_stop linear_bg 0.2 #7c4105
+add_color_stop linear_bg 0.5 #e8d8c8
+add_color_stop linear_bg 1 #2b05b6
+set_fill_gradient linear_bg
+fill_rect 600 0 540 200
+
 draw_image ../images/tests/image_220x200.png 860 0
 set_fill_style black
 set_font 32px common
