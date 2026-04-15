@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::color::{parse_color, Color};
+use crate::color::Color;
 use crate::font::Font;
+use crate::gradient::{LinearGradient, RadialGradient, Style};
 use crate::image::ImageData;
 use crate::path::{Path, PathCommand};
-use crate::render::{self, LineCap};
+use crate::render::{self, LineCap, TextAlign};
 
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
@@ -48,8 +49,8 @@ impl Canvas {
             buffer: Rc::clone(&self.buffer),
             width: self.width,
             height: self.height,
-            fill_style: Color::black(),
-            stroke_style: Color::black(),
+            fill_style: Style::from_color(Color::black()),
+            stroke_style: Style::from_color(Color::black()),
             line_width: 1.0,
             line_cap: LineCap::Butt,
             path: Path::new(),
@@ -60,6 +61,8 @@ impl Canvas {
             font_family: "common".to_string(),
             font_style: String::new(),
             font_string: "32px common".to_string(),
+            text_align: TextAlign::Start,
+            state_stack: Vec::new(),
         })
     }
 
@@ -84,6 +87,27 @@ impl Canvas {
     }
 }
 
+// ── Canvas State (for save/restore) ───────────────────────────────────────────
+
+/// Saved state for Canvas save/restore operations.
+/// Mirrors the Web Canvas API behavior where the drawing state is saved,
+/// but not the current path.
+#[derive(Clone)]
+struct ContextState {
+    fill_style: Style,
+    stroke_style: Style,
+    line_width: f64,
+    line_cap: LineCap,
+    clip: Option<Vec<bool>>,
+    font: Option<Font>,
+    common_font: Option<Font>,
+    font_size: u32,
+    font_family: String,
+    font_style: String,
+    font_string: String,
+    text_align: TextAlign,
+}
+
 // ── Context2D ────────────────────────────────────────────────────────────────
 
 /// A 2-D rendering context, analogous to the browser `CanvasRenderingContext2D`.
@@ -93,8 +117,8 @@ pub struct Context2D {
     height: u32,
 
     // ── State ──────────────────────────────────────────────────
-    fill_style: Color,
-    stroke_style: Color,
+    fill_style: Style,
+    stroke_style: Style,
     line_width: f64,
     line_cap: LineCap,
     path: Path,
@@ -107,6 +131,10 @@ pub struct Context2D {
     font_family: String,
     font_style: String,  // bold, italic, etc.
     font_string: String, // original font string like "bold 48px serif"
+    text_align: TextAlign,
+
+    // ── State Stack (for save/restore) ────────────────────────
+    state_stack: Vec<ContextState>,
 }
 
 // ─── Property accessors ───────────────────────────────────────────────────────
@@ -114,32 +142,54 @@ pub struct Context2D {
 impl Context2D {
     // fill_style
 
-    /// Set the fill colour from any CSS colour string.
+    /// Set the fill style from any CSS colour string.
     /// Invalid strings are silently ignored.
     pub fn set_fill_style(&mut self, style: &str) {
-        if let Some(c) = parse_color(style) {
-            self.fill_style = c;
+        if let Some(s) = Style::from_color_str(style) {
+            self.fill_style = s;
         }
     }
 
-    /// Return the current fill colour as an `"rgba(r,g,b,a)"` string.
+    /// Set the fill style from a gradient.
+    pub fn set_fill_style_gradient(&mut self, gradient: &LinearGradient) {
+        self.fill_style = Style::LinearGradient(gradient.clone());
+    }
+
+    /// Set the fill style from a radial gradient.
+    pub fn set_fill_style_radial_gradient(&mut self, gradient: &RadialGradient) {
+        self.fill_style = Style::RadialGradient(gradient.clone());
+    }
+
+    /// Return the current fill style as a string representation.
+    /// For colors, returns `"rgba(r,g,b,a)"`.
+    /// For gradients, returns a description string.
     pub fn fill_style(&self) -> String {
-        color_to_css(self.fill_style)
+        style_to_string(&self.fill_style)
     }
 
     // stroke_style
 
-    /// Set the stroke colour from any CSS colour string.
+    /// Set the stroke style from any CSS colour string.
     /// Invalid strings are silently ignored.
     pub fn set_stroke_style(&mut self, style: &str) {
-        if let Some(c) = parse_color(style) {
-            self.stroke_style = c;
+        if let Some(s) = Style::from_color_str(style) {
+            self.stroke_style = s;
         }
     }
 
-    /// Return the current stroke colour as an `"rgba(r,g,b,a)"` string.
+    /// Set the stroke style from a gradient.
+    pub fn set_stroke_style_gradient(&mut self, gradient: &LinearGradient) {
+        self.stroke_style = Style::LinearGradient(gradient.clone());
+    }
+
+    /// Set the stroke style from a radial gradient.
+    pub fn set_stroke_style_radial_gradient(&mut self, gradient: &RadialGradient) {
+        self.stroke_style = Style::RadialGradient(gradient.clone());
+    }
+
+    /// Return the current stroke style as a string representation.
     pub fn stroke_style(&self) -> String {
-        color_to_css(self.stroke_style)
+        style_to_string(&self.stroke_style)
     }
 
     // line_width
@@ -192,6 +242,22 @@ impl Context2D {
         if self.font.is_none() {
             self.font = Font::load(&self.font_family).ok();
         }
+    }
+
+    // text_align
+
+    /// Set the text alignment: `"start"` (default), `"end"`, `"left"`, `"right"`, or `"center"`.
+    ///
+    /// - `start` and `left`: Text starts at the given x position (left-aligned).
+    /// - `end` and `right`: Text ends at the given x position (right-aligned).
+    /// - `center`: Text is centered at the given x position.
+    pub fn set_text_align(&mut self, align: &str) {
+        self.text_align = TextAlign::parse_align(align);
+    }
+
+    /// Return the current text alignment as a string.
+    pub fn text_align(&self) -> &'static str {
+        self.text_align.as_str()
     }
 }
 
@@ -246,22 +312,22 @@ impl Context2D {
     /// Fill the interior of the current path with `fillStyle`.
     pub fn fill(&mut self) {
         let sub_paths = self.path.flatten();
-        let color = self.fill_style;
+        let style = self.fill_style.clone();
         let mut buf = self.buffer.borrow_mut();
         for pts in &sub_paths {
-            render::fill_subpath(&mut buf, self.width, self.height, pts, color, &self.clip);
+            render::fill_subpath_style(&mut buf, self.width, self.height, pts, &style, &self.clip);
         }
     }
 
     /// Stroke the outline of the current path with `strokeStyle`.
     pub fn stroke(&mut self) {
         let sub_paths = self.path.flatten();
-        let color = self.stroke_style;
+        let style = self.stroke_style.clone();
         let lw = self.line_width;
         let cap = self.line_cap;
         let mut buf = self.buffer.borrow_mut();
         for pts in &sub_paths {
-            render::stroke_polyline(&mut buf, self.width, self.height, pts, color, lw, cap, &self.clip);
+            render::stroke_polyline_style(&mut buf, self.width, self.height, pts, &style, lw, cap, &self.clip);
         }
     }
 
@@ -285,28 +351,28 @@ impl Context2D {
 impl Context2D {
     /// Fill a rectangle with `fillStyle`.
     pub fn fill_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
-        let color = self.fill_style;
-        render::fill_rect(
+        let style = self.fill_style.clone();
+        render::fill_rect_style(
             &mut self.buffer.borrow_mut(),
             self.width,
             self.height,
             x, y, width, height,
-            color,
+            &style,
             &self.clip,
         );
     }
 
     /// Stroke the outline of a rectangle with `strokeStyle`.
     pub fn stroke_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
-        let color = self.stroke_style;
+        let style = self.stroke_style.clone();
         let lw = self.line_width;
         let cap = self.line_cap;
-        render::stroke_rect(
+        render::stroke_rect_style(
             &mut self.buffer.borrow_mut(),
             self.width,
             self.height,
             x, y, width, height,
-            color, lw, cap,
+            &style, lw, cap,
             &self.clip,
         );
     }
@@ -389,6 +455,11 @@ impl Context2D {
     ///
     /// The text is rendered using the loaded font bitmap, scaled to the current
     /// `font_size`. Characters not found in the font will fallback to common font.
+    ///
+    /// The x position is interpreted based on `textAlign`:
+    /// - `start` / `left`: x is the left edge of the text.
+    /// - `end` / `right`: x is the right edge of the text.
+    /// - `center`: x is the center of the text.
     pub fn fill_text(&mut self, text: &str, x: f64, y: f64) {
         // println!("fill_text: '{}' at ({}, {}) with font '{}'", text, x, y, self.font_string);
         self.ensure_font_loaded();
@@ -402,14 +473,34 @@ impl Context2D {
         }
 
         let primary_font = primary_font.unwrap();
-        let color = self.fill_style;
+        let style = self.fill_style.clone();
         let font_size = self.font_size;
 
         // Calculate scale
         let scale = font_size as f64 / primary_font.config.size as f64;
         let scaled_height = (primary_font.config.size as f64 * scale).ceil() as u32;
 
-        let mut x_offset = x;
+        // First, calculate total text width to apply textAlign
+        let mut total_scaled_width = 0.0;
+        for ch in text.chars() {
+            let char_bitmap = primary_font.get_char(ch)
+                .or_else(|| self.common_font.as_ref().and_then(|f| f.get_char(ch)));
+
+            if let Some(char_bm) = char_bitmap {
+                let scaled_width = (char_bm.width as f64 * scale).ceil() as f64;
+                total_scaled_width += scaled_width;
+            } else if ch == ' ' {
+                // Space character not in font: default to half-width (size/2)
+                let half_width = primary_font.config.size / 2;
+                let scaled_width = (half_width as f64 * scale).ceil() as f64;
+                total_scaled_width += scaled_width;
+            }
+        }
+
+        // Apply textAlign offset
+        let x_offset = x - self.text_align.calculate_x_offset(total_scaled_width);
+
+        let mut current_x = x_offset;
 
         // Render each character with fallback
         for ch in text.chars() {
@@ -429,15 +520,15 @@ impl Context2D {
 
                         if src_x < char_bm.width as usize && src_y < char_bm.height as usize {
                             if char_bm.bitmap[src_y][src_x] {
-                                let px = x_offset as i64 + dst_x as i64;
+                                let px = current_x as i64 + dst_x as i64;
                                 let py = y as i64 + dst_y as i64;
-                                render::put_pixel(
+                                render::put_pixel_style(
                                     &mut buf,
                                     self.width,
                                     self.height,
                                     px,
                                     py,
-                                    color,
+                                    &style,
                                     &self.clip,
                                 );
                             }
@@ -445,12 +536,12 @@ impl Context2D {
                     }
                 }
 
-                x_offset += scaled_width as f64;
+                current_x += scaled_width as f64;
             } else if ch == ' ' {
                 // Space character not in font: default to half-width (size/2)
                 let half_width = primary_font.config.size / 2;
                 let scaled_width = (half_width as f64 * scale).ceil() as f64;
-                x_offset += scaled_width;
+                current_x += scaled_width;
             }
         }
     }
@@ -458,6 +549,11 @@ impl Context2D {
     /// Fill text with maximum width constraint.
     /// If the text is wider than max_width, it will be scaled down to fit.
     /// Characters not found in the font will fallback to common font.
+    ///
+    /// The x position is interpreted based on `textAlign`:
+    /// - `start` / `left`: x is the left edge of the text.
+    /// - `end` / `right`: x is the right edge of the text.
+    /// - `center`: x is the center of the text.
     pub fn fill_text_with_max_width(&mut self, text: &str, x: f64, y: f64, max_width: f64) {
         self.ensure_font_loaded();
 
@@ -485,9 +581,13 @@ impl Context2D {
             1.0
         };
 
-        let color = self.fill_style;
+        let style = self.fill_style.clone();
         let scaled_height = (bitmap.len() as f64 * scale).ceil() as usize;
         let scaled_width = (bitmap[0].len() as f64 * scale).ceil() as usize;
+        let scaled_width_f64 = scaled_width as f64;
+
+        // Apply textAlign offset
+        let x_offset = x - self.text_align.calculate_x_offset(scaled_width_f64);
 
         // Draw scaled text
         let mut buf = self.buffer.borrow_mut();
@@ -498,15 +598,15 @@ impl Context2D {
                 let src_y = (dst_y as f64 / scale).round() as usize;
 
                 if src_y < bitmap.len() && src_x < bitmap[src_y].len() && bitmap[src_y][src_x] {
-                    let px = x as i64 + dst_x as i64;
+                    let px = x_offset as i64 + dst_x as i64;
                     let py = y as i64 + dst_y as i64;
-                    render::put_pixel(
+                    render::put_pixel_style(
                         &mut buf,
                         self.width,
                         self.height,
                         px,
                         py,
-                        color,
+                        &style,
                         &self.clip,
                     );
                 }
@@ -536,10 +636,134 @@ impl Context2D {
     }
 }
 
+// ─── State management methods (save/restore) ───────────────────────────────────
+
+impl Context2D {
+    /// Save the current drawing state onto the state stack.
+    ///
+    /// The saved state includes:
+    /// - fill style, stroke style
+    /// - line width, line cap
+    /// - clipping region
+    /// - font settings (font, font size, font family, font style, font string)
+    ///
+    /// Note: The current path is NOT saved, consistent with Web Canvas API behavior.
+    pub fn save(&mut self) {
+        let state = ContextState {
+            fill_style: self.fill_style.clone(),
+            stroke_style: self.stroke_style.clone(),
+            line_width: self.line_width,
+            line_cap: self.line_cap,
+            clip: self.clip.clone(),
+            font: self.font.clone(),
+            common_font: self.common_font.clone(),
+            font_size: self.font_size,
+            font_family: self.font_family.clone(),
+            font_style: self.font_style.clone(),
+            font_string: self.font_string.clone(),
+            text_align: self.text_align,
+        };
+        self.state_stack.push(state);
+    }
+
+    /// Restore the drawing state from the state stack.
+    ///
+    /// Pops the top state from the stack and applies it to the context.
+    /// If the state stack is empty, this method does nothing.
+    ///
+    /// Note: The current path is NOT restored, consistent with Web Canvas API behavior.
+    pub fn restore(&mut self) {
+        if let Some(state) = self.state_stack.pop() {
+            self.fill_style = state.fill_style;
+            self.stroke_style = state.stroke_style;
+            self.line_width = state.line_width;
+            self.line_cap = state.line_cap;
+            self.clip = state.clip;
+            self.font = state.font;
+            self.common_font = state.common_font;
+            self.font_size = state.font_size;
+            self.font_family = state.font_family;
+            self.font_style = state.font_style;
+            self.font_string = state.font_string;
+            self.text_align = state.text_align;
+        }
+    }
+}
+
+// ─── Gradient creation methods ───────────────────────────────────────────────────
+
+impl Context2D {
+    /// Create a linear gradient along the line from (x0, y0) to (x1, y1).
+    ///
+    /// Returns a `LinearGradient` that can be configured with color stops
+    /// and then assigned to `fillStyle` or `strokeStyle`.
+    ///
+    /// # Example
+    /// ```
+    /// use canvas::Canvas;
+    ///
+    /// let canvas = Canvas::new(200, 100);
+    /// let mut ctx = canvas.get_context("2d").unwrap();
+    ///
+    /// let mut gradient = ctx.create_linear_gradient(0.0, 0.0, 200.0, 0.0);
+    /// gradient.add_color_stop(0.0, "red");
+    /// gradient.add_color_stop(1.0, "blue");
+    /// ctx.set_fill_style_gradient(&gradient);
+    /// ctx.fill_rect(0.0, 0.0, 200.0, 100.0);
+    /// ```
+    pub fn create_linear_gradient(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> LinearGradient {
+        LinearGradient::new(x0, y0, x1, y1)
+    }
+
+    /// Create a radial gradient from inner circle (x0, y0, r0) to outer circle (x1, y1, r1).
+    ///
+    /// Returns a `RadialGradient` that can be configured with color stops
+    /// and then assigned to `fillStyle` or `strokeStyle`.
+    ///
+    /// # Example
+    /// ```
+    /// use canvas::Canvas;
+    ///
+    /// let canvas = Canvas::new(100, 100);
+    /// let mut ctx = canvas.get_context("2d").unwrap();
+    ///
+    /// let mut gradient = ctx.create_radial_gradient(50.0, 50.0, 10.0, 50.0, 50.0, 50.0);
+    /// gradient.add_color_stop(0.0, "red");
+    /// gradient.add_color_stop(1.0, "blue");
+    /// ctx.set_fill_style_radial_gradient(&gradient);
+    /// ctx.fill_rect(0.0, 0.0, 100.0, 100.0);
+    /// ```
+    pub fn create_radial_gradient(
+        &self,
+        x0: f64,
+        y0: f64,
+        r0: f64,
+        x1: f64,
+        y1: f64,
+        r1: f64,
+    ) -> RadialGradient {
+        RadialGradient::new(x0, y0, r0, x1, y1, r1)
+    }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn color_to_css(c: Color) -> String {
     format!("rgba({},{},{},{})", c.r, c.g, c.b, c.a as f64 / 255.0)
+}
+
+fn style_to_string(style: &Style) -> String {
+    match style {
+        Style::Color(c) => color_to_css(*c),
+        Style::LinearGradient(g) => {
+            format!("LinearGradient({},{}) -> ({},{}) with {} stops",
+                g.x0, g.y0, g.x1, g.y1, g.stops.len())
+        }
+        Style::RadialGradient(g) => {
+            format!("RadialGradient({},{},{}) -> ({},{},{}) with {} stops",
+                g.x0, g.y0, g.r0, g.x1, g.y1, g.r1, g.stops.len())
+        }
+    }
 }
 
 /// Parse CSS font string like "bold 48px serif".

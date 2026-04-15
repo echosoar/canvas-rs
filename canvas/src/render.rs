@@ -4,6 +4,7 @@
 #![allow(clippy::too_many_arguments, clippy::ptr_arg)]
 
 use crate::color::Color;
+use crate::gradient::Style;
 use crate::image::ImageData;
 
 // ── Pixel helpers ────────────────────────────────────────────────────────────
@@ -128,6 +129,58 @@ impl LineCap {
             LineCap::Butt => "butt",
             LineCap::Round => "round",
             LineCap::Square => "square",
+        }
+    }
+}
+
+/// Text alignment for fill_text operations.
+/// `start` and `left` are equivalent (left-aligned).
+/// `end` and `right` are equivalent (right-aligned).
+/// `center` centers the text at the given x position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlign {
+    Start,
+    End,
+    Left,
+    Right,
+    Center,
+}
+
+impl TextAlign {
+    /// Parse a text alignment string.
+    /// Defaults to `Start` for invalid values.
+    pub fn parse_align(s: &str) -> TextAlign {
+        match s {
+            "start" => TextAlign::Start,
+            "end" => TextAlign::End,
+            "left" => TextAlign::Left,
+            "right" => TextAlign::Right,
+            "center" => TextAlign::Center,
+            _ => TextAlign::Start,
+        }
+    }
+
+    /// Convert to string representation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TextAlign::Start => "start",
+            TextAlign::End => "end",
+            TextAlign::Left => "left",
+            TextAlign::Right => "right",
+            TextAlign::Center => "center",
+        }
+    }
+
+    /// Calculate the x offset for text rendering based on alignment.
+    /// Returns the offset to subtract from the given x position.
+    /// - Start/Left: no offset (x is left edge)
+    /// - End/Right: full text width offset (x is right edge)
+    /// - Center: half text width offset (x is center)
+    pub fn calculate_x_offset(self, text_width: f64) -> f64 {
+        match self {
+            TextAlign::Start | TextAlign::Left => 0.0,
+            TextAlign::End | TextAlign::Right => text_width,
+            TextAlign::Center => text_width / 2.0,
         }
     }
 }
@@ -477,6 +530,317 @@ pub fn draw_image_region(
             put_pixel(buf, canvas_width, canvas_height, px, py, color, clip);
         }
     }
+}
+
+// ── Style-based rendering (supports gradients) ─────────────────────────────────
+
+/// Set a pixel using a Style (which may be a color or gradient).
+#[inline]
+pub fn put_pixel_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x: i64,
+    y: i64,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    if x < 0 || y < 0 || x >= width as i64 || y >= height as i64 {
+        return;
+    }
+    let idx = (y as u32 * width + x as u32) as usize;
+    if let Some(mask) = clip {
+        if !mask[idx] {
+            return;
+        }
+    }
+    // Get color at this pixel position for gradient support
+    let color = style.color_at(x as f64, y as f64);
+    let base = idx * 4;
+    let dst = Color::rgba(buf[base], buf[base + 1], buf[base + 2], buf[base + 3]);
+    let result = color.blend_onto(dst);
+    buf[base] = result.r;
+    buf[base + 1] = result.g;
+    buf[base + 2] = result.b;
+    buf[base + 3] = result.a;
+}
+
+/// Fill an axis-aligned rectangle with a Style.
+pub fn fill_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    let x0 = x.floor() as i64;
+    let y0 = y.floor() as i64;
+    let x1 = (x + w).ceil() as i64;
+    let y1 = (y + h).ceil() as i64;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            put_pixel_style(buf, width, height, px, py, style, clip);
+        }
+    }
+}
+
+/// Stroke an axis-aligned rectangle outline with a Style.
+pub fn stroke_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    style: &Style,
+    line_width: f64,
+    line_cap: LineCap,
+    clip: &Option<Vec<bool>>,
+) {
+    let (x0, y0, x1, y1) = (x, y, x + w, y + h);
+    draw_thick_line_style(buf, width, height, x0, y0, x1, y0, style, line_width, line_cap, clip);
+    draw_thick_line_style(buf, width, height, x1, y0, x1, y1, style, line_width, line_cap, clip);
+    draw_thick_line_style(buf, width, height, x1, y1, x0, y1, style, line_width, line_cap, clip);
+    draw_thick_line_style(buf, width, height, x0, y1, x0, y0, style, line_width, line_cap, clip);
+}
+
+/// Fill a circle (disc) centred at `(cx, cy)` with the given `radius` using a Style.
+fn fill_disc_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    let r = radius.ceil() as i64;
+    let cx_i = cx.round() as i64;
+    let cy_i = cy.round() as i64;
+    let r2 = radius * radius;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            let d2 = (dx * dx + dy * dy) as f64;
+            if d2 <= r2 + 0.5 {
+                put_pixel_style(buf, width, height, cx_i + dx, cy_i + dy, style, clip);
+            }
+        }
+    }
+}
+
+/// Draw a thick line with a Style.
+pub fn draw_thick_line_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    style: &Style,
+    line_width: f64,
+    cap: LineCap,
+    clip: &Option<Vec<bool>>,
+) {
+    let hw = line_width / 2.0;
+
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len = (dx * dx + dy * dy).sqrt();
+
+    if len < 1e-9 {
+        match cap {
+            LineCap::Round => fill_disc_style(buf, width, height, x0, y0, hw, style, clip),
+            _ => fill_rect_style(
+                buf, width, height,
+                x0 - hw, y0 - hw, line_width, line_width,
+                style, clip,
+            ),
+        }
+        return;
+    }
+
+    let nx = -dy / len;
+    let ny = dx / len;
+    let ux = dx / len;
+    let uy = dy / len;
+
+    let (p0x, p0y, p1x, p1y) = match cap {
+        LineCap::Square => (
+            x0 - ux * hw,
+            y0 - uy * hw,
+            x1 + ux * hw,
+            y1 + uy * hw,
+        ),
+        _ => (x0, y0, x1, y1),
+    };
+
+    let corners = [
+        (p0x + nx * hw, p0y + ny * hw),
+        (p0x - nx * hw, p0y - ny * hw),
+        (p1x - nx * hw, p1y - ny * hw),
+        (p1x + nx * hw, p1y + ny * hw),
+    ];
+
+    fill_polygon_style(buf, width, height, &corners, style, clip);
+
+    if cap == LineCap::Round {
+        fill_disc_style(buf, width, height, x0, y0, hw, style, clip);
+        fill_disc_style(buf, width, height, x1, y1, hw, style, clip);
+    }
+}
+
+/// Fill an arbitrary simple polygon using a Style.
+pub fn fill_polygon_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    pts: &[(f64, f64)],
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    if pts.len() < 3 {
+        return;
+    }
+    let min_y = pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let max_y = pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+
+    let y_start = min_y.floor() as i64;
+    let y_end = max_y.ceil() as i64;
+
+    let n = pts.len();
+
+    for py in y_start..=y_end {
+        let fy = py as f64 + 0.5;
+        let mut crossings: Vec<f64> = Vec::new();
+        for i in 0..n {
+            let (x0, y0) = pts[i];
+            let (x1, y1) = pts[(i + 1) % n];
+            if (y0 <= fy && y1 > fy) || (y1 <= fy && y0 > fy) {
+                let t = (fy - y0) / (y1 - y0);
+                crossings.push(x0 + t * (x1 - x0));
+            }
+        }
+        crossings.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut i = 0;
+        while i + 1 < crossings.len() {
+            let xa = crossings[i].floor() as i64;
+            let xb = crossings[i + 1].ceil() as i64;
+            for px in xa..xb {
+                put_pixel_style(buf, width, height, px, py, style, clip);
+            }
+            i += 2;
+        }
+    }
+}
+
+/// Stroke a polyline with a Style.
+pub fn stroke_polyline_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    pts: &[(f64, f64)],
+    style: &Style,
+    line_width: f64,
+    cap: LineCap,
+    clip: &Option<Vec<bool>>,
+) {
+    if pts.len() < 2 {
+        if pts.len() == 1 {
+            match cap {
+                LineCap::Round => {
+                    fill_disc_style(buf, width, height, pts[0].0, pts[0].1, line_width / 2.0, style, clip)
+                }
+                _ => fill_rect_style(
+                    buf, width, height,
+                    pts[0].0 - line_width / 2.0,
+                    pts[0].1 - line_width / 2.0,
+                    line_width,
+                    line_width,
+                    style, clip,
+                ),
+            }
+        }
+        return;
+    }
+
+    for i in 0..pts.len() - 1 {
+        let (x0, y0) = pts[i];
+        let (x1, y1) = pts[i + 1];
+        draw_thick_line_style(buf, width, height, x0, y0, x1, y1, style, line_width, LineCap::Butt, clip);
+    }
+
+    let hw = line_width / 2.0;
+    match cap {
+        LineCap::Butt => {}
+        LineCap::Round => {
+            fill_disc_style(buf, width, height, pts[0].0, pts[0].1, hw, style, clip);
+            let last = *pts.last().unwrap();
+            fill_disc_style(buf, width, height, last.0, last.1, hw, style, clip);
+        }
+        LineCap::Square => {
+            add_square_cap_style(buf, width, height, pts[0], pts[1], hw, style, clip, true);
+            let n = pts.len();
+            add_square_cap_style(buf, width, height, pts[n - 1], pts[n - 2], hw, style, clip, true);
+        }
+    }
+}
+
+/// Add a square cap using a Style.
+fn add_square_cap_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    tip: (f64, f64),
+    neighbour: (f64, f64),
+    hw: f64,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+    _outward: bool,
+) {
+    let dx = tip.0 - neighbour.0;
+    let dy = tip.1 - neighbour.1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return;
+    }
+    let ux = dx / len;
+    let uy = dy / len;
+    let nx = -uy;
+    let ny = ux;
+    let corners = [
+        (tip.0 + nx * hw, tip.1 + ny * hw),
+        (tip.0 - nx * hw, tip.1 - ny * hw),
+        (tip.0 - nx * hw + ux * hw, tip.1 - ny * hw + uy * hw),
+        (tip.0 + nx * hw + ux * hw, tip.1 + ny * hw + uy * hw),
+    ];
+    fill_polygon_style(buf, width, height, &corners, style, clip);
+}
+
+/// Fill a closed sub-path using a Style.
+pub fn fill_subpath_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    pts: &[(f64, f64)],
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    let mut polygon: Vec<(f64, f64)> = pts.to_vec();
+    if polygon.len() >= 2 {
+        let first = polygon[0];
+        let last = *polygon.last().unwrap();
+        if (first.0 - last.0).abs() > 1e-9 || (first.1 - last.1).abs() > 1e-9 {
+            polygon.push(first);
+        }
+    }
+    fill_polygon_style(buf, width, height, &polygon, style, clip);
 }
 
 

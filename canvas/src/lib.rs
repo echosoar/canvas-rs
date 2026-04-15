@@ -27,6 +27,7 @@
 pub mod canvas;
 pub mod color;
 pub mod font;
+pub mod gradient;
 pub mod image;
 pub mod path;
 pub mod render;
@@ -34,5 +35,6 @@ pub mod render;
 pub use crate::canvas::{Canvas, Context2D};
 pub use crate::color::Color;
 pub use crate::font::{Font, FontConfig, FontWidth};
+pub use crate::gradient::{LinearGradient, RadialGradient, Style};
 pub use crate::image::ImageData;
-pub use crate::render::LineCap;
+pub use crate::render::{LineCap, TextAlign};
