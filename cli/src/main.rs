@@ -25,6 +25,7 @@ fn print_usage() {
     println!("  set_fill_style <color>            - Set fill style (e.g., red, #ff0000, rgb(255,0,0))");
     println!("  set_stroke_style <color>          - Set stroke style");
     println!("  set_font <size>px <family>        - Set font (e.g., 32px common)");
+    println!("  set_text_align <align>            - Set text alignment (start, end, left, right, center)");
     println!("  set_line_width <width>            - Set line width");
     println!("  fill_rect <x> <y> <w> <h>         - Fill a rectangle");
     println!("  stroke_rect <x> <y> <w> <h>       - Stroke a rectangle");
@@ -156,6 +157,11 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                     // Reconstruct font string like "32px common"
                     let font_str = parts[1..].join(" ");
                     ctx.set_font(&font_str);
+                }
+            }
+            "set_text_align" => {
+                if parts.len() >= 2 {
+                    ctx.set_text_align(parts[1]);
                 }
             }
             "set_line_width" => {

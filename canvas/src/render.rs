@@ -133,6 +133,58 @@ impl LineCap {
     }
 }
 
+/// Text alignment for fill_text operations.
+/// `start` and `left` are equivalent (left-aligned).
+/// `end` and `right` are equivalent (right-aligned).
+/// `center` centers the text at the given x position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlign {
+    Start,
+    End,
+    Left,
+    Right,
+    Center,
+}
+
+impl TextAlign {
+    /// Parse a text alignment string.
+    /// Defaults to `Start` for invalid values.
+    pub fn parse_align(s: &str) -> TextAlign {
+        match s {
+            "start" => TextAlign::Start,
+            "end" => TextAlign::End,
+            "left" => TextAlign::Left,
+            "right" => TextAlign::Right,
+            "center" => TextAlign::Center,
+            _ => TextAlign::Start,
+        }
+    }
+
+    /// Convert to string representation.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TextAlign::Start => "start",
+            TextAlign::End => "end",
+            TextAlign::Left => "left",
+            TextAlign::Right => "right",
+            TextAlign::Center => "center",
+        }
+    }
+
+    /// Calculate the x offset for text rendering based on alignment.
+    /// Returns the offset to subtract from the given x position.
+    /// - Start/Left: no offset (x is left edge)
+    /// - End/Right: full text width offset (x is right edge)
+    /// - Center: half text width offset (x is center)
+    pub fn calculate_x_offset(self, text_width: f64) -> f64 {
+        match self {
+            TextAlign::Start | TextAlign::Left => 0.0,
+            TextAlign::End | TextAlign::Right => text_width,
+            TextAlign::Center => text_width / 2.0,
+        }
+    }
+}
+
 /// Fill a circle (disc) centred at `(cx, cy)` with the given `radius`.
 fn fill_disc(
     buf: &mut Vec<u8>,

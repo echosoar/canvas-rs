@@ -37,4 +37,4 @@ pub use crate::color::Color;
 pub use crate::font::{Font, FontConfig, FontWidth};
 pub use crate::gradient::{LinearGradient, RadialGradient, Style};
 pub use crate::image::ImageData;
-pub use crate::render::LineCap;
+pub use crate::render::{LineCap, TextAlign};

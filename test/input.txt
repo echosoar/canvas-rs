@@ -19,9 +19,14 @@ fill_rect 600 0 540 200
 draw_image ../images/tests/image_220x200.png 860 0
 set_fill_style black
 set_font 32px common
-fill_text "让天下没有难生成的图。" 20 50
+
+# 居中对齐
+set_text_align center
+fill_text "让天下没有难生成的图。" 450 50
 set_fill_style red
+set_text_align start
 fill_text "Make it so that no graph is difficult to generate." 20 90
 set_fill_style blue
 set_font 16px common
-fill_text "--- 2026.03.15" 20 130
+set_text_align right
+fill_text "--- 2026.03.15" 820 130

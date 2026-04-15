@@ -53,6 +53,7 @@ set_line_width <width>
 
 ```
 set_font <size>px <family>
+set_text_align <align>
 ```
 
 示例：`set_font 32px common`
@@ -60,6 +61,14 @@ set_font <size>px <family>
 - `size`：字号（像素），决定文字高度。
 - `family`：字体名，对应 `lib/<family>.txt` 位图字体文件。
 - 内置字体：`common`（支持 ASCII 及常用中文字符）。
+
+`set_text_align` 设置文本对齐方式：
+
+- `start` / `left`：左对齐（默认），`x` 是文本左边缘。
+- `end` / `right`：右对齐，`x` 是文本右边缘。
+- `center`：居中对齐，`x` 是文本中心点。
+
+示例：`set_text_align center`
 
 ---
 
@@ -84,7 +93,11 @@ fill_text "<text>" <x> <y>
 ```
 
 - `<text>` 需用双引号包裹（支持空格和中文）。
-- 坐标 `(x, y)` 是文字左上角位置（像素）。
+- 坐标 `(x, y)` 的含义取决于当前 `text_align` 设置：
+  - `start` / `left`：`x` 是文本左边缘位置。
+  - `end` / `right`：`x` 是文本右边缘位置。
+  - `center`：`x` 是文本中心位置。
+- `y` 始终是文本顶部位置。
 
 ---
 

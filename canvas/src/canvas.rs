@@ -6,7 +6,7 @@ use crate::font::Font;
 use crate::gradient::{LinearGradient, RadialGradient, Style};
 use crate::image::ImageData;
 use crate::path::{Path, PathCommand};
-use crate::render::{self, LineCap};
+use crate::render::{self, LineCap, TextAlign};
 
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,7 @@ impl Canvas {
             font_family: "common".to_string(),
             font_style: String::new(),
             font_string: "32px common".to_string(),
+            text_align: TextAlign::Start,
             state_stack: Vec::new(),
         })
     }
@@ -104,6 +105,7 @@ struct ContextState {
     font_family: String,
     font_style: String,
     font_string: String,
+    text_align: TextAlign,
 }
 
 // ── Context2D ────────────────────────────────────────────────────────────────
@@ -129,6 +131,7 @@ pub struct Context2D {
     font_family: String,
     font_style: String,  // bold, italic, etc.
     font_string: String, // original font string like "bold 48px serif"
+    text_align: TextAlign,
 
     // ── State Stack (for save/restore) ────────────────────────
     state_stack: Vec<ContextState>,
@@ -239,6 +242,22 @@ impl Context2D {
         if self.font.is_none() {
             self.font = Font::load(&self.font_family).ok();
         }
+    }
+
+    // text_align
+
+    /// Set the text alignment: `"start"` (default), `"end"`, `"left"`, `"right"`, or `"center"`.
+    ///
+    /// - `start` and `left`: Text starts at the given x position (left-aligned).
+    /// - `end` and `right`: Text ends at the given x position (right-aligned).
+    /// - `center`: Text is centered at the given x position.
+    pub fn set_text_align(&mut self, align: &str) {
+        self.text_align = TextAlign::parse_align(align);
+    }
+
+    /// Return the current text alignment as a string.
+    pub fn text_align(&self) -> &'static str {
+        self.text_align.as_str()
     }
 }
 
@@ -436,6 +455,11 @@ impl Context2D {
     ///
     /// The text is rendered using the loaded font bitmap, scaled to the current
     /// `font_size`. Characters not found in the font will fallback to common font.
+    ///
+    /// The x position is interpreted based on `textAlign`:
+    /// - `start` / `left`: x is the left edge of the text.
+    /// - `end` / `right`: x is the right edge of the text.
+    /// - `center`: x is the center of the text.
     pub fn fill_text(&mut self, text: &str, x: f64, y: f64) {
         // println!("fill_text: '{}' at ({}, {}) with font '{}'", text, x, y, self.font_string);
         self.ensure_font_loaded();
@@ -456,7 +480,27 @@ impl Context2D {
         let scale = font_size as f64 / primary_font.config.size as f64;
         let scaled_height = (primary_font.config.size as f64 * scale).ceil() as u32;
 
-        let mut x_offset = x;
+        // First, calculate total text width to apply textAlign
+        let mut total_scaled_width = 0.0;
+        for ch in text.chars() {
+            let char_bitmap = primary_font.get_char(ch)
+                .or_else(|| self.common_font.as_ref().and_then(|f| f.get_char(ch)));
+
+            if let Some(char_bm) = char_bitmap {
+                let scaled_width = (char_bm.width as f64 * scale).ceil() as f64;
+                total_scaled_width += scaled_width;
+            } else if ch == ' ' {
+                // Space character not in font: default to half-width (size/2)
+                let half_width = primary_font.config.size / 2;
+                let scaled_width = (half_width as f64 * scale).ceil() as f64;
+                total_scaled_width += scaled_width;
+            }
+        }
+
+        // Apply textAlign offset
+        let x_offset = x - self.text_align.calculate_x_offset(total_scaled_width);
+
+        let mut current_x = x_offset;
 
         // Render each character with fallback
         for ch in text.chars() {
@@ -476,7 +520,7 @@ impl Context2D {
 
                         if src_x < char_bm.width as usize && src_y < char_bm.height as usize {
                             if char_bm.bitmap[src_y][src_x] {
-                                let px = x_offset as i64 + dst_x as i64;
+                                let px = current_x as i64 + dst_x as i64;
                                 let py = y as i64 + dst_y as i64;
                                 render::put_pixel_style(
                                     &mut buf,
@@ -492,12 +536,12 @@ impl Context2D {
                     }
                 }
 
-                x_offset += scaled_width as f64;
+                current_x += scaled_width as f64;
             } else if ch == ' ' {
                 // Space character not in font: default to half-width (size/2)
                 let half_width = primary_font.config.size / 2;
                 let scaled_width = (half_width as f64 * scale).ceil() as f64;
-                x_offset += scaled_width;
+                current_x += scaled_width;
             }
         }
     }
@@ -505,6 +549,11 @@ impl Context2D {
     /// Fill text with maximum width constraint.
     /// If the text is wider than max_width, it will be scaled down to fit.
     /// Characters not found in the font will fallback to common font.
+    ///
+    /// The x position is interpreted based on `textAlign`:
+    /// - `start` / `left`: x is the left edge of the text.
+    /// - `end` / `right`: x is the right edge of the text.
+    /// - `center`: x is the center of the text.
     pub fn fill_text_with_max_width(&mut self, text: &str, x: f64, y: f64, max_width: f64) {
         self.ensure_font_loaded();
 
@@ -535,6 +584,10 @@ impl Context2D {
         let style = self.fill_style.clone();
         let scaled_height = (bitmap.len() as f64 * scale).ceil() as usize;
         let scaled_width = (bitmap[0].len() as f64 * scale).ceil() as usize;
+        let scaled_width_f64 = scaled_width as f64;
+
+        // Apply textAlign offset
+        let x_offset = x - self.text_align.calculate_x_offset(scaled_width_f64);
 
         // Draw scaled text
         let mut buf = self.buffer.borrow_mut();
@@ -545,7 +598,7 @@ impl Context2D {
                 let src_y = (dst_y as f64 / scale).round() as usize;
 
                 if src_y < bitmap.len() && src_x < bitmap[src_y].len() && bitmap[src_y][src_x] {
-                    let px = x as i64 + dst_x as i64;
+                    let px = x_offset as i64 + dst_x as i64;
                     let py = y as i64 + dst_y as i64;
                     render::put_pixel_style(
                         &mut buf,
@@ -608,6 +661,7 @@ impl Context2D {
             font_family: self.font_family.clone(),
             font_style: self.font_style.clone(),
             font_string: self.font_string.clone(),
+            text_align: self.text_align,
         };
         self.state_stack.push(state);
     }
@@ -631,6 +685,7 @@ impl Context2D {
             self.font_family = state.font_family;
             self.font_style = state.font_style;
             self.font_string = state.font_string;
+            self.text_align = state.text_align;
         }
     }
 }
