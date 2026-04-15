@@ -22,12 +22,14 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-x64
+            target: x86_64-unknown-linux-gnu
             binary: canvas-cli
-          - os: macos-latest
-            platform: macos-x64
+          - os: macos-14
+            platform: macos-universal
             binary: canvas-cli
           - os: windows-latest
             platform: windows-x64
+            target: x86_64-pc-windows-msvc
             binary: canvas-cli.exe
 
     steps:
@@ -37,24 +39,53 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binary
-        run: cargo build --release -p canvas-cli
+      - name: Add Rust target
+        if: matrix.platform != 'macos-universal'
+        run: rustup target add ${{ matrix.target }}
 
-      - name: Package binary (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Add Rust targets (macOS universal)
+        if: matrix.platform == 'macos-universal'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Build release binary
+        if: matrix.platform != 'macos-universal'
+        run: cargo build --release -p canvas-cli --target ${{ matrix.target }}
+
+      - name: Build release binaries (macOS universal)
+        if: matrix.platform == 'macos-universal'
+        run: |
+          cargo build --release -p canvas-cli --target aarch64-apple-darwin
+          cargo build --release -p canvas-cli --target x86_64-apple-darwin
+
+      - name: Package binary (macOS universal)
+        if: matrix.platform == 'macos-universal'
         run: |
           mkdir -p dist
-          cp target/release/${{ matrix.binary }} dist/
+          lipo -create \
+            target/aarch64-apple-darwin/release/${{ matrix.binary }} \
+            target/x86_64-apple-darwin/release/${{ matrix.binary }} \
+            -output dist/${{ matrix.binary }}
+          cp SKILL.md dist/
           cd dist
-          zip -r ../canvas-cli-${{ matrix.platform }}.zip ${{ matrix.binary }}
+          zip -r ../canvas-cli-${{ matrix.platform }}.zip ${{ matrix.binary }} SKILL.md
+
+      - name: Package binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+          cp SKILL.md dist/
+          cd dist
+          zip -r ../canvas-cli-${{ matrix.platform }}.zip ${{ matrix.binary }} SKILL.md
 
       - name: Package binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item target/release/${{ matrix.binary }} dist/${{ matrix.binary }}
-          Compress-Archive -Path dist/${{ matrix.binary }} -DestinationPath canvas-cli-${{ matrix.platform }}.zip -Force
+          Copy-Item target/${{ matrix.target }}/release/${{ matrix.binary }} dist/${{ matrix.binary }}
+          Copy-Item SKILL.md dist/SKILL.md
+          Compress-Archive -Path dist/${{ matrix.binary }},dist/SKILL.md -DestinationPath canvas-cli-${{ matrix.platform }}.zip -Force
 
       - name: Upload zipped artifact
         uses: actions/upload-artifact@v4
