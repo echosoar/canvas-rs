@@ -563,7 +563,8 @@ fn font_render_three_lines_with_nested_rects() {
 
     let png_bytes = std::fs::read("tests/image_220x200.png").expect("could not read PNG file");
     let img_data = images::from_png(&png_bytes).expect("could not decode PNG");
-    ctx.draw_image(&img_data, 860.0, 0.0);
+    ctx.draw_image_with_size(&img_data, 860.0, 0.0, 100.0, 150.0);
+    ctx.draw_image_source(&img_data,50.0, 50.0, 100.0, 100.0, 260.0, 0.0, 100.0, 150.0);
 
     // Draw text inside the rects (30px from edge)
     ctx.set_fill_style("black");

@@ -21,7 +21,9 @@ fn print_usage() {
     println!("  2. <operation> <args...>");
     println!();
     println!("Operations:");
-    println!("  draw_image <path> <x> <y>        - Draw an image at position (x, y)");
+    println!("  draw_image <path> <dx> <dy>                                       - Draw an image at (dx, dy) at natural size");
+    println!("  draw_image <path> <dx> <dy> <dw> <dh>                            - Draw an image scaled to (dw, dh)");
+    println!("  draw_image <path> <sx> <sy> <sw> <sh> <dx> <dy> <dw> <dh>       - Draw a sub-region of an image scaled to (dw, dh)");
     println!("  set_fill_style <color>            - Set fill style (e.g., red, #ff0000, rgb(255,0,0))");
     println!("  set_stroke_style <color>          - Set stroke style");
     println!("  set_font <size>px <family>        - Set font (e.g., 32px common)");
@@ -119,10 +121,12 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
 
         match op {
             "draw_image" => {
+                // Supported forms:
+                //   draw_image <path> <dx> <dy>
+                //   draw_image <path> <dx> <dy> <dw> <dh>
+                //   draw_image <path> <sx> <sy> <sw> <sh> <dx> <dy> <dw> <dh>
                 if parts.len() >= 4 {
                     let path = parts[1];
-                    let x = parse_float(parts[2]);
-                    let y = parse_float(parts[3]);
 
                     // Resolve path relative to input file
                     let image_path = if Path::new(path).is_absolute() {
@@ -133,7 +137,30 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
 
                     if let Ok(png_bytes) = fs::read(&image_path) {
                         if let Ok(img_data) = images::from_png(&png_bytes) {
-                            ctx.draw_image(&img_data, x, y);
+                            if parts.len() >= 10 {
+                                // 9-arg: sx sy sw sh dx dy dw dh
+                                let sx = parse_float(parts[2]);
+                                let sy = parse_float(parts[3]);
+                                let sw = parse_float(parts[4]);
+                                let sh = parse_float(parts[5]);
+                                let dx = parse_float(parts[6]);
+                                let dy = parse_float(parts[7]);
+                                let dw = parse_float(parts[8]);
+                                let dh = parse_float(parts[9]);
+                                ctx.draw_image_source(&img_data, sx, sy, sw, sh, dx, dy, dw, dh);
+                            } else if parts.len() >= 6 {
+                                // 5-arg: dx dy dw dh
+                                let dx = parse_float(parts[2]);
+                                let dy = parse_float(parts[3]);
+                                let dw = parse_float(parts[4]);
+                                let dh = parse_float(parts[5]);
+                                ctx.draw_image_with_size(&img_data, dx, dy, dw, dh);
+                            } else {
+                                // 3-arg: dx dy
+                                let x = parse_float(parts[2]);
+                                let y = parse_float(parts[3]);
+                                ctx.draw_image(&img_data, x, y);
+                            }
                         } else {
                             eprintln!("Warning: Failed to decode image: {}", image_path);
                         }

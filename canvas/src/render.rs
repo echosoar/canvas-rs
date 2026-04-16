@@ -501,18 +501,30 @@ pub fn draw_image(
 }
 
 /// Draw a region of `image` (sx,sy,sw,sh) scaled into (dx,dy,dw,dh).
+///
+/// Negative values for `sw`, `sh`, `dw`, or `dh` are supported per the
+/// HTML Canvas spec: the sub-rectangle is grown in the opposite direction but
+/// pixels are always processed in the original direction (no flip).
 pub fn draw_image_region(
     buf: &mut Vec<u8>,
     canvas_width: u32,
     canvas_height: u32,
     image: &ImageData,
-    sx: f64, sy: f64, sw: f64, sh: f64,
-    dx: f64, dy: f64, dw: f64, dh: f64,
+    mut sx: f64, mut sy: f64, mut sw: f64, mut sh: f64,
+    mut dx: f64, mut dy: f64, mut dw: f64, mut dh: f64,
     clip: &Option<Vec<bool>>,
 ) {
-    if dw <= 0.0 || dh <= 0.0 || sw <= 0.0 || sh <= 0.0 {
+    // Return early on zero dimensions (nothing to paint).
+    if dw == 0.0 || dh == 0.0 || sw == 0.0 || sh == 0.0 {
         return;
     }
+    // Normalize negative source dimensions: shift origin, keep positive size.
+    if sw < 0.0 { sx += sw; sw = -sw; }
+    if sh < 0.0 { sy += sh; sh = -sh; }
+    // Normalize negative destination dimensions similarly (no flip per spec).
+    if dw < 0.0 { dx += dw; dw = -dw; }
+    if dh < 0.0 { dy += dh; dh = -dh; }
+
     let x0 = dx.floor() as i64;
     let y0 = dy.floor() as i64;
     let x1 = (dx + dw).ceil() as i64;

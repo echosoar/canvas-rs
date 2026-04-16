@@ -1,9 +1,9 @@
 ---
 name: canvas-cli
-description: 一个命令行图片生成工具。可以通过读取一段简单的文本指令脚本，即可完成 2D 图形绘制 ，并可以将生成的图片输出为 PNG 图像文件或 Base64 Data URL。
+description: 一个命令行图片生成工具。可以通过读取一段简单的文本指令脚本，即可完成 2D 图形绘制，并可以将生成的图片输出为 PNG 图像文件或 Base64 Data URL。也可以使用本工具的 draw_image 指令对已有的 PNG 图片进行裁剪、缩放和重绘。
 ---
 
-> 提示：`canvas-cli` 命令的可执行文件放在本技能目录中，下述说明中的 `./canvas-cli` 指的就是这个可执行文件。
+> 提示：`canvas-cli` 命令的可执行文件放在本技能目录中，下述说明中的 `./canvas-cli` 指的就是这个可执行文件，canvas-cli 是可以直接运行的二进制可执行文件，不是脚本文件。。
 
 ## 命令行用法
 
@@ -193,11 +193,35 @@ restore
 ### 图片绘制
 
 ```
-draw_image <path> <x> <y>
+draw_image <path> <dx> <dy>
+draw_image <path> <dx> <dy> <dWidth> <dHeight>
+draw_image <path> <sx> <sy> <sWidth> <sHeight> <dx> <dy> <dWidth> <dHeight>
 ```
 
 - `<path>`：PNG 文件路径，支持相对路径（相对于输入脚本文件所在目录）或绝对路径。
-- `(x, y)`：图片放置的左上角坐标。
+- `dx` / `dy`：目标画布中放置图片左上角的坐标。
+- `dWidth` / `dHeight`：目标绘制尺寸，用于缩放图片。
+- `sx` / `sy`：源图中裁剪区域左上角坐标。
+- `sWidth` / `sHeight`：源图裁剪区域尺寸。
+
+说明：
+- 3 参数形式：按原始尺寸绘制整张图片。
+- 5 参数形式：绘制整张图片，并缩放到指定目标尺寸。
+- 9 参数形式：先从源图裁剪子区域，再绘制到目标区域并缩放。
+- `sWidth`、`sHeight`、`dWidth`、`dHeight` 可以为负值，表示向相反方向扩展区域，但不会导致图片翻转。
+
+示例：
+
+```text
+# 按原图尺寸绘制
+draw_image ./avatar.png 40 20
+
+# 缩放到 120x120
+draw_image ./avatar.png 200 20 120 120
+
+# 从源图裁剪 (10, 10, 80, 80)，绘制到目标 (380, 20, 160, 160)
+draw_image ./avatar.png 10 10 80 80 380 20 160 160
+```
 
 ---
 
