@@ -74,10 +74,16 @@ impl Font {
     /// # 返回
     /// 成功返回 Font 对象，失败返回错误信息
     pub fn load(font_name: &str) -> Result<Self, String> {
-        let filename = if font_name.is_empty() {
+        let normalized_font_name = if font_name.eq_ignore_ascii_case("arial") {
+            "common"
+        } else {
+            font_name
+        };
+
+        let filename = if normalized_font_name.is_empty() {
             "common.txt".to_string()
         } else {
-            format!("{}.txt", font_name)
+            format!("{}.txt", normalized_font_name)
         };
 
         // 尝试从多个路径查找字体文件
@@ -99,16 +105,28 @@ impl Font {
         }
 
         let file_path = file_path.ok_or_else(|| {
-            format!(
-                "Font file '{}' not found in lib directory",
-                filename
-            )
-        })?;
+            format!("Font file '{}' not found in lib directory", filename)
+        });
 
-        let content = fs::read_to_string(&file_path)
-            .map_err(|e| format!("Failed to read font file: {}", e))?;
+        if let Ok(file_path) = file_path {
+            let content = fs::read_to_string(&file_path)
+                .map_err(|e| format!("Failed to read font file: {}", e))?;
 
-        Self::parse(&content, font_name)
+            return Self::parse(&content, normalized_font_name);
+        }
+
+        // Fallback to an embedded default font so packaged binaries can still render text.
+        if filename == "common.txt" {
+            let embedded_font = include_str!("../lib/common.txt");
+            let embedded_name = if normalized_font_name.is_empty() {
+                "common"
+            } else {
+                normalized_font_name
+            };
+            return Self::parse(embedded_font, embedded_name);
+        }
+
+        Err(format!("Font file '{}' not found in lib directory", filename))
     }
 
     /// 从字符串内容解析字体

@@ -45,9 +45,11 @@ set_line_width <width>
 ```
 
 `<color>` 支持：
-- CSS 命名色：`red`、`white`、`black`、`blue` 等
-- 十六进制：`#RGB`、`#RRGGBB`、`#RRGGBBAA`
-- 函数式：`rgb(255,0,0)`、`rgba(255,0,0,128)`
+- CSS 命名色：`red`、`white`、`black`、`blue` 等，例如 `set_fill_style red`
+- 十六进制：`#RGB`、`#RRGGBB`、`#RRGGBBAA`，例如 `set_fill_style #FF0000`
+- 函数式：`rgb(255,0,0)`、`rgba(255,0,0,128)`，例如 `set_stroke_style rgba(0,255,0,0.5)`
+
+`<width>` 是线宽，单位像素，例如 `set_line_width 5`
 
 ---
 
@@ -125,7 +127,7 @@ stroke
 
 ### 渐变
 
-支持线性渐变和径向渐变，可与 Web Canvas API 行为一致。
+支持绘制线性渐变和径向渐变，当用户提到渐变时，没有特殊指定则认为是线性渐变。
 
 #### 创建渐变
 
