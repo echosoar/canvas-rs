@@ -1,0 +1,535 @@
+canvas 1600 1200
+
+# 设置深蓝色背景
+set_fill_style #1E3A5F
+fill_rect 0 0 1600 1200
+
+# 绘制网格背景
+set_stroke_style rgba(255,255,255,0.1)
+set_line_width 1
+# 水平网格线
+begin_path
+move_to 0 100
+line_to 1600 100
+move_to 0 200
+line_to 1600 200
+move_to 0 300
+line_to 1600 300
+move_to 0 400
+line_to 1600 400
+move_to 0 500
+line_to 1600 500
+move_to 0 600
+line_to 1600 600
+move_to 0 700
+line_to 1600 700
+move_to 0 800
+line_to 1600 800
+move_to 0 900
+line_to 1600 900
+move_to 0 1000
+line_to 1600 1000
+move_to 0 1100
+line_to 1600 1100
+stroke
+# 垂直网格线
+begin_path
+move_to 100 0
+line_to 100 1200
+move_to 200 0
+line_to 200 1200
+move_to 300 0
+line_to 300 1200
+move_to 400 0
+line_to 400 1200
+move_to 500 0
+line_to 500 1200
+move_to 600 0
+line_to 600 1200
+move_to 700 0
+line_to 700 1200
+move_to 800 0
+line_to 800 1200
+move_to 900 0
+line_to 900 1200
+move_to 1000 0
+line_to 1000 1200
+move_to 1100 0
+line_to 1100 1200
+move_to 1200 0
+line_to 1200 1200
+move_to 1300 0
+line_to 1300 1200
+move_to 1400 0
+line_to 1400 1200
+move_to 1500 0
+line_to 1500 1200
+stroke
+
+# 绘制标题框
+set_stroke_style #2563EB
+set_line_width 3
+stroke_rect 50 30 1500 80
+set_fill_style #2563EB
+fill_rect 60 40 1480 60
+set_fill_style white
+set_font 36px common
+set_text_align center
+fill_text "电商平台系统架构图" 800 60
+
+# ========== 第一层：用户接入层 ==========
+set_stroke_style #00CED1
+set_line_width 2
+stroke_rect 100 150 1400 120
+set_fill_style rgba(0,206,209,0.15)
+fill_rect 100 150 1400 120
+
+# 用户接入层标题
+set_fill_style #00CED1
+set_font 20px common
+set_text_align left
+fill_text "【用户接入层】" 120 175
+
+# 用户终端模块
+set_stroke_style white
+set_line_width 1
+stroke_rect 150 200 200 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 150 200 200 50
+set_fill_style white
+set_font 16px common
+set_text_align center
+fill_text "Web浏览器" 250 220
+
+begin_path
+round_rect 400 200 200 50 0,30,50,60
+stroke
+# stroke_rect 400 200 200 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 400 200 200 50
+set_fill_style white
+fill_text "移动端APP" 500 220
+
+stroke_rect 650 200 200 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 650 200 200 50
+set_fill_style white
+fill_text "小程序" 750 220
+
+stroke_rect 900 200 200 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 900 200 200 50
+set_fill_style white
+fill_text "H5页面" 1000 220
+
+stroke_rect 1150 200 200 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 1150 200 200 50
+set_fill_style white
+fill_text "管理后台" 1250 220
+
+# ========== 第二层：网关与负载均衡层 ==========
+set_stroke_style #F59E0B
+set_line_width 2
+stroke_rect 100 300 1400 100
+set_fill_style rgba(245,158,11,0.15)
+fill_rect 100 300 1400 100
+
+# 网关层标题
+set_fill_style #F59E0B
+set_font 20px common
+set_text_align left
+fill_text "【网关与负载均衡层】" 120 325
+
+# CDN
+set_stroke_style white
+set_line_width 1
+stroke_rect 200 350 150 40
+set_fill_style rgba(245,158,11,0.4)
+fill_rect 200 350 150 40
+set_fill_style white
+set_font 14px common
+set_text_align center
+fill_text "CDN加速" 275 365
+
+# WAF
+stroke_rect 400 350 150 40
+set_fill_style rgba(245,158,11,0.4)
+fill_rect 400 350 150 40
+set_fill_style white
+fill_text "WAF防火墙" 475 365
+
+# API Gateway
+stroke_rect 600 350 200 40
+set_fill_style rgba(245,158,11,0.5)
+fill_rect 600 350 200 40
+set_fill_style white
+set_font 16px common
+fill_text "API Gateway" 700 365
+
+# 负载均衡
+stroke_rect 850 350 150 40
+set_fill_style rgba(245,158,11,0.4)
+fill_rect 850 350 150 40
+set_fill_style white
+set_font 14px common
+fill_text "Nginx/LB" 925 365
+
+# 限流熔断
+stroke_rect 1050 350 150 40
+set_fill_style rgba(245,158,11,0.4)
+fill_rect 1050 350 150 40
+set_fill_style white
+fill_text "限流熔断" 1125 365
+
+# 认证中心
+stroke_rect 1250 350 150 40
+set_fill_style rgba(245,158,11,0.4)
+fill_rect 1250 350 150 40
+set_fill_style white
+fill_text "统一认证" 1325 365
+
+# ========== 第三层：业务服务层 ==========
+set_stroke_style #2563EB
+set_line_width 2
+stroke_rect 100 430 1400 200
+set_fill_style rgba(37,99,235,0.1)
+fill_rect 100 430 1400 200
+
+# 业务服务层标题
+set_fill_style #2563EB
+set_font 20px common
+set_text_align left
+fill_text "【核心业务服务层 - 微服务架构】" 120 455
+
+# 第一行业务服务
+set_stroke_style white
+set_line_width 1
+stroke_rect 150 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 150 480 140 50
+set_fill_style white
+set_font 14px common
+set_text_align center
+fill_text "用户服务" 220 500
+
+stroke_rect 320 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 320 480 140 50
+set_fill_style white
+fill_text "商品服务" 390 500
+
+stroke_rect 490 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 490 480 140 50
+set_fill_style white
+fill_text "订单服务" 560 500
+
+stroke_rect 660 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 660 480 140 50
+set_fill_style white
+fill_text "支付服务" 730 500
+
+stroke_rect 830 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 830 480 140 50
+set_fill_style white
+fill_text "库存服务" 900 500
+
+stroke_rect 1000 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 1000 480 140 50
+set_fill_style white
+fill_text "购物车服务" 1070 500
+
+stroke_rect 1170 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 1170 480 140 50
+set_fill_style white
+fill_text "搜索服务" 1240 500
+
+stroke_rect 1340 480 140 50
+set_fill_style rgba(37,99,235,0.4)
+fill_rect 1340 480 140 50
+set_fill_style white
+fill_text "推荐服务" 1410 500
+
+# 第二行业务服务
+stroke_rect 250 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 250 550 160 50
+set_fill_style white
+fill_text "营销促销服务" 330 570
+
+stroke_rect 450 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 450 550 160 50
+set_fill_style white
+fill_text "优惠券服务" 530 570
+
+stroke_rect 650 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 650 550 160 50
+set_fill_style white
+fill_text "消息通知服务" 730 570
+
+stroke_rect 850 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 850 550 160 50
+set_fill_style white
+fill_text "评论评价服务" 930 570
+
+stroke_rect 1050 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 1050 550 160 50
+set_fill_style white
+fill_text "物流跟踪服务" 1130 570
+
+stroke_rect 1250 550 160 50
+set_fill_style rgba(37,99,235,0.3)
+fill_rect 1250 550 160 50
+set_fill_style white
+fill_text "售后服务" 1330 570
+
+# ========== 第四层：数据存储层 ==========
+set_stroke_style #00CED1
+set_line_width 2
+stroke_rect 100 660 1400 180
+set_fill_style rgba(0,206,209,0.1)
+fill_rect 100 660 1400 180
+
+# 数据层标题
+set_fill_style #00CED1
+set_font 20px common
+set_text_align left
+fill_text "【数据存储层】" 120 685
+
+# 关系型数据库
+set_stroke_style white
+set_line_width 1
+stroke_rect 150 710 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 150 710 180 50
+set_fill_style white
+set_font 14px common
+set_text_align center
+fill_text "MySQL集群" 240 730
+
+stroke_rect 150 770 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 150 770 180 50
+set_fill_style white
+fill_text "主从复制" 240 790
+
+# Redis缓存
+stroke_rect 400 710 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 400 710 180 50
+set_fill_style white
+fill_text "Redis集群" 490 730
+
+stroke_rect 400 770 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 400 770 180 50
+set_fill_style white
+fill_text "分布式缓存" 490 790
+
+# MongoDB
+stroke_rect 650 710 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 650 710 180 50
+set_fill_style white
+fill_text "MongoDB" 740 730
+
+stroke_rect 650 770 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 650 770 180 50
+set_fill_style white
+fill_text "文档存储" 740 790
+
+# Elasticsearch
+stroke_rect 900 710 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 900 710 180 50
+set_fill_style white
+fill_text "Elasticsearch" 990 730
+
+stroke_rect 900 770 180 50
+set_fill_style rgba(0,206,209,0.4)
+fill_rect 900 770 180 50
+set_fill_style white
+fill_text "搜索引擎" 990 790
+
+# 消息队列
+stroke_rect 1150 710 180 110
+set_fill_style rgba(0,206,209,0.3)
+fill_rect 1150 710 180 110
+set_fill_style white
+set_font 14px common
+fill_text "RocketMQ/" 1240 745
+fill_text "Kafka" 1240 770
+fill_text "消息队列" 1240 795
+
+# ========== 第五层：基础设施层 ==========
+set_stroke_style #F59E0B
+set_line_width 2
+stroke_rect 100 870 1400 150
+set_fill_style rgba(245,158,11,0.1)
+fill_rect 100 870 1400 150
+
+# 基础设施层标题
+set_fill_style #F59E0B
+set_font 20px common
+set_text_align left
+fill_text "【基础设施与运维层】" 120 895
+
+# 容器云
+set_stroke_style white
+set_line_width 1
+stroke_rect 150 920 180 80
+set_fill_style rgba(245,158,11,0.3)
+fill_rect 150 920 180 80
+set_fill_style white
+set_font 14px common
+set_text_align center
+fill_text "Docker" 240 945
+fill_text "Kubernetes" 240 975
+
+# 监控告警
+stroke_rect 400 920 180 80
+set_fill_style rgba(245,158,11,0.3)
+fill_rect 400 920 180 80
+set_fill_style white
+fill_text "Prometheus" 490 945
+fill_text "Grafana" 490 975
+
+# 日志系统
+stroke_rect 650 920 180 80
+set_fill_style rgba(245,158,11,0.3)
+fill_rect 650 920 180 80
+set_fill_style white
+fill_text "ELK Stack" 740 945
+fill_text "日志收集" 740 975
+
+# CI/CD
+stroke_rect 900 920 180 80
+set_fill_style rgba(245,158,11,0.3)
+fill_rect 900 920 180 80
+set_fill_style white
+fill_text "Jenkins" 990 945
+fill_text "DevOps" 990 975
+
+# 云服务
+stroke_rect 1150 920 180 80
+set_fill_style rgba(245,158,11,0.3)
+fill_rect 1150 920 180 80
+set_fill_style white
+fill_text "阿里云/腾讯云" 1240 945
+fill_text "对象存储OSS" 1240 975
+
+# ========== 绘制连接线和箭头 ==========
+# 层间连接线
+set_stroke_style rgba(255,255,255,0.5)
+set_line_width 2
+
+# 用户层到网关层
+begin_path
+move_to 800 270
+line_to 800 300
+stroke
+
+# 网关层到业务层
+begin_path
+move_to 800 400
+line_to 800 430
+stroke
+
+# 业务层到数据层
+begin_path
+move_to 800 630
+line_to 800 660
+stroke
+
+# 数据层到基础设施层
+begin_path
+move_to 800 840
+line_to 800 870
+stroke
+
+# 绘制箭头
+set_fill_style white
+# 向下箭头
+begin_path
+move_to 800 300
+line_to 795 295
+line_to 805 295
+close_path
+fill
+
+begin_path
+move_to 800 430
+line_to 795 425
+line_to 805 425
+close_path
+fill
+
+begin_path
+move_to 800 660
+line_to 795 655
+line_to 805 655
+close_path
+fill
+
+begin_path
+move_to 800 870
+line_to 795 865
+line_to 805 865
+close_path
+fill
+
+# ========== 绘制图例 ==========
+set_stroke_style white
+set_line_width 1
+stroke_rect 1300 1040 200 100
+set_fill_style rgba(30,58,95,0.9)
+fill_rect 1300 1040 200 100
+
+set_fill_style white
+set_font 14px common
+set_text_align left
+fill_text "图例说明:" 1310 1060
+
+set_fill_style #00CED1
+fill_rect 1310 1075 20 15
+set_fill_style white
+fill_text "- 接入/数据层" 1340 1085
+
+set_fill_style #F59E0B
+fill_rect 1310 1095 20 15
+set_fill_style white
+fill_text "- 网关/基础设施" 1340 1105
+
+set_fill_style #2563EB
+fill_rect 1310 1115 20 15
+set_fill_style white
+fill_text "- 业务服务层" 1340 1125
+
+# ========== 尺寸标注 ==========
+set_stroke_style rgba(255,255,255,0.3)
+set_line_width 1
+# 左侧尺寸线
+begin_path
+move_to 30 150
+line_to 30 1050
+stroke
+# 右侧尺寸线
+begin_path
+move_to 1570 150
+line_to 1570 1050
+stroke
+
+set_fill_style rgba(255,255,255,0.5)
+set_font 12px common
+set_text_align center
+fill_text "SCALE 1:100" 80 1100

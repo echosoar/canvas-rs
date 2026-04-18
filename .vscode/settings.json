@@ -1,0 +1,7 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "cargo test": true,
+        "cargo build": true,
+        "/usr/bin/time": true
+    }
+}

@@ -32,6 +32,7 @@ fn print_usage() {
     println!("  set_line_width <width>            - Set line width");
     println!("  fill_rect <x> <y> <w> <h>         - Fill a rectangle");
     println!("  stroke_rect <x> <y> <w> <h>       - Stroke a rectangle");
+    println!("  roundRect|round_rect <x> <y> <w> <h> <radii...> - Add a rounded rectangle to the current path");
     println!("  fill_text \"<text>\" <x> <y>       - Fill text at position (x, y)");
     println!("  begin_path                        - Begin a new path");
     println!("  move_to <x> <y>                   - Move to position");
@@ -108,6 +109,43 @@ fn split_next_token(s: &str) -> Option<(&str, &str)> {
     Some((token, rest))
 }
 
+fn is_ignored_command_line(s: &str) -> bool {
+    let trimmed = s.trim();
+    trimmed.is_empty() || trimmed.starts_with('#')
+}
+
+fn first_meaningful_command_index(commands: &[String]) -> Option<usize> {
+    commands
+        .iter()
+        .position(|cmd| !is_ignored_command_line(cmd))
+}
+
+fn parse_number_list(s: &str) -> Vec<f64> {
+    s.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(parse_float)
+        .collect()
+}
+
+fn parse_round_rect_args(s: &str) -> Option<(f64, f64, f64, f64, Vec<f64>)> {
+    let (x, rest) = split_next_token(s)?;
+    let (y, rest) = split_next_token(rest)?;
+    let (width, rest) = split_next_token(rest)?;
+    let (height, rest) = split_next_token(rest)?;
+    let radii = parse_number_list(rest);
+    if radii.is_empty() {
+        return None;
+    }
+
+    Some((
+        parse_float(x),
+        parse_float(y),
+        parse_float(width),
+        parse_float(height),
+        radii,
+    ))
+}
+
 /// Stores either a linear or radial gradient
 enum Gradient {
     Linear(LinearGradient),
@@ -120,7 +158,7 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
 
     for cmd in commands {
         let cmd = cmd.trim();
-        if cmd.is_empty() || cmd.starts_with('#') {
+        if is_ignored_command_line(cmd) {
             continue;
         }
 
@@ -234,6 +272,11 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                     ctx.stroke_rect(x, y, w, h);
                 }
             }
+            "round_rect" | "roundRect" => {
+                if let Some((x, y, width, height, radii)) = parse_round_rect_args(cmd[op.len()..].trim()) {
+                    ctx.round_rect(x, y, width, height, &radii);
+                }
+            }
             "fill_text" => {
                 // Re-parse the full command to properly handle quoted text
                 let full_cmd = cmd.trim();
@@ -321,14 +364,14 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                         if color.is_empty() {
                             continue;
                         }
-                    if let Some(gradient) = gradients.get_mut(id) {
-                        match gradient {
-                            Gradient::Linear(g) => g.add_color_stop(parse_float(offset), color),
-                            Gradient::Radial(g) => g.add_color_stop(parse_float(offset), color),
+                        if let Some(gradient) = gradients.get_mut(id) {
+                            match gradient {
+                                Gradient::Linear(g) => g.add_color_stop(parse_float(offset), color),
+                                Gradient::Radial(g) => g.add_color_stop(parse_float(offset), color),
+                            }
+                        } else {
+                            eprintln!("Warning: Gradient '{}' not found", id);
                         }
-                    } else {
-                        eprintln!("Warning: Gradient '{}' not found", id);
-                    }
                     }
                 }
             }
@@ -408,7 +451,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let first_line = commands[0].trim();
+    let canvas_index = match first_meaningful_command_index(&commands) {
+        Some(index) => index,
+        None => {
+            eprintln!("Error: No commands found");
+            std::process::exit(1);
+        }
+    };
+
+    let first_line = commands[canvas_index].trim();
     let canvas_parts: Vec<&str> = first_line.split_whitespace().collect();
 
     if canvas_parts.is_empty() || canvas_parts[0] != "canvas" {
@@ -428,7 +479,7 @@ fn main() {
     let mut ctx = canvas.get_context("2d").expect("Failed to get 2d context");
 
     // Execute remaining commands
-    execute_commands(&mut ctx, &commands[1..], &base_path);
+    execute_commands(&mut ctx, &commands[canvas_index + 1..], &base_path);
 
     // Output
     let png_bytes = images::to_blob(&canvas);
@@ -476,6 +527,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn first_meaningful_command_index_skips_blank_and_comment_lines() {
+        let commands = vec![
+            "".to_string(),
+            "   ".to_string(),
+            "# generated by script".to_string(),
+            "  # keep this note".to_string(),
+            "canvas 200 100".to_string(),
+            "fill_rect 0 0 10 10".to_string(),
+        ];
+
+        assert_eq!(first_meaningful_command_index(&commands), Some(4));
+    }
+
+    #[test]
+    fn first_meaningful_command_index_returns_none_when_only_comments_exist() {
+        let commands = vec!["".to_string(), " # comment".to_string(), "   ".to_string()];
+
+        assert_eq!(first_meaningful_command_index(&commands), None);
+    }
+
+    #[test]
     fn split_next_token_preserves_remaining_text() {
         let (token, rest) = split_next_token("gradient 0.5 rgba(255, 0, 0, 0.08)").unwrap();
         assert_eq!(token, "gradient");
@@ -519,5 +591,23 @@ mod tests {
         assert_eq!(pixel.g, 0);
         assert_eq!(pixel.b, 0);
         assert_eq!(pixel.a, 20);
+    }
+
+    #[test]
+    fn execute_commands_supports_round_rect_path() {
+        let canvas = Canvas::new(16, 16);
+        let mut ctx = canvas.get_context("2d").unwrap();
+        let commands = vec![
+            "set_fill_style red".to_string(),
+            "begin_path".to_string(),
+            "roundRect 2 2 12 12 4,4,4,4".to_string(),
+            "fill".to_string(),
+        ];
+
+        execute_commands(&mut ctx, &commands, Path::new("."));
+
+        let image = canvas.get_image_data();
+        assert_eq!(image.get_pixel(8, 8).r, 255);
+        assert_eq!(image.get_pixel(2, 2).a, 0);
     }
 }

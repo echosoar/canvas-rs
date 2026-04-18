@@ -214,6 +214,18 @@ fn fill_rect_full_canvas() {
     }
 }
 
+#[test]
+fn fill_rect_is_antialiased() {
+    let canvas = Canvas::new(20, 20);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_fill_style("red");
+    ctx.fill_rect(3.25, 3.25, 10.5, 8.5);
+
+    let img = canvas.get_image_data();
+    let edge = img.get_pixel(3, 3);
+    assert!(edge.a > 0 && edge.a < 255, "fill_rect edge should be antialiased: a={}", edge.a);
+}
+
 // ── clear_rect ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -255,6 +267,19 @@ fn stroke_rect_draws_border() {
     assert_eq!(interior.a, 0, "interior of stroke_rect should be transparent");
 }
 
+#[test]
+fn stroke_rect_is_antialiased() {
+    let canvas = Canvas::new(24, 24);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_stroke_style("blue");
+    ctx.set_line_width(1.0);
+    ctx.stroke_rect(4.25, 4.25, 12.5, 10.5);
+
+    let img = canvas.get_image_data();
+    let edge = img.get_pixel(8, 4);
+    assert!(edge.a > 0 && edge.a < 255, "stroke_rect edge should be antialiased: a={}", edge.a);
+}
+
 // ── path fill & stroke ───────────────────────────────────────────────────────
 
 #[test]
@@ -291,6 +316,22 @@ fn path_stroke_line() {
     let px = img.get_pixel(15, 5);
     assert_eq!(px.b, 255, "stroked line should be blue");
     assert!(px.a > 0, "stroked line pixel should not be transparent");
+}
+
+#[test]
+fn path_stroke_line_is_antialiased() {
+    let canvas = Canvas::new(20, 20);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_stroke_style("blue");
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.move_to(2.5, 2.5);
+    ctx.line_to(17.5, 8.5);
+    ctx.stroke();
+
+    let img = canvas.get_image_data();
+    let edge = img.get_pixel(5, 3);
+    assert!(edge.a > 0 && edge.a < 255, "line edge should be antialiased: a={}", edge.a);
 }
 
 // ── arc ──────────────────────────────────────────────────────────────────────
@@ -330,6 +371,69 @@ fn arc_stroke_circle() {
     let on_circle = img.get_pixel(45, 25); // rightmost point ≈ (25+20, 25)
     assert!(on_circle.a > 0 || img.get_pixel(44, 25).a > 0,
         "point on circle circumference should be drawn");
+}
+
+#[test]
+fn arc_stroke_circle_is_antialiased() {
+    let canvas = Canvas::new(50, 50);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_stroke_style("blue");
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.arc(25.5, 25.5, 10.5, 0.0, PI * 2.0, false);
+    ctx.stroke();
+
+    let img = canvas.get_image_data();
+    let edge = img.get_pixel(36, 25);
+    assert!(edge.a > 0 && edge.a < 255, "arc edge should be antialiased: a={}", edge.a);
+}
+
+#[test]
+fn round_rect_fill_has_rounded_corners() {
+    let canvas = Canvas::new(30, 24);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_fill_style("red");
+    ctx.begin_path();
+    ctx.round_rect(4.0, 4.0, 20.0, 12.0, &[4.0]);
+    ctx.fill();
+
+    let img = canvas.get_image_data();
+    assert_eq!(img.get_pixel(14, 10).r, 255, "rounded rect center should be filled");
+    assert_eq!(img.get_pixel(4, 4).a, 0, "outer corner should remain transparent");
+    assert!(img.get_pixel(14, 4).a > 0, "top edge should be filled");
+}
+
+#[test]
+fn round_rect_fill_is_antialiased() {
+    let canvas = Canvas::new(30, 24);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_fill_style("red");
+    ctx.begin_path();
+    ctx.round_rect(4.25, 4.25, 20.0, 12.0, &[4.5]);
+    ctx.fill();
+
+    let img = canvas.get_image_data();
+    let edge = img.get_pixel(8, 4);
+    assert!(edge.a > 0 && edge.a < 255, "round_rect edge should be antialiased: a={}", edge.a);
+}
+
+#[test]
+fn round_rect_stroke_draws_outline_only() {
+    let canvas = Canvas::new(30, 24);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    ctx.set_stroke_style("blue");
+    ctx.set_line_width(1.0);
+    ctx.begin_path();
+    ctx.round_rect(4.0, 4.0, 20.0, 12.0, &[3.0, 5.0, 3.0, 5.0]);
+    ctx.stroke();
+
+    let img = canvas.get_image_data();
+    assert!(
+        img.get_pixel(14, 3).a > 0 || img.get_pixel(14, 4).a > 0,
+        "top outline should be stroked"
+    );
+    assert_eq!(img.get_pixel(14, 10).a, 0, "interior should remain transparent");
+    assert_eq!(img.get_pixel(3, 3).a, 0, "outer corner should remain transparent");
 }
 
 // ── drawImage ────────────────────────────────────────────────────────────────
