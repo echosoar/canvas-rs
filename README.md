@@ -1,9 +1,33 @@
-# canvas-rs
+# canvas-cli
 pure rust implemented drawer library( api like canvas), and no dependencies, super lightweight, can be used in any rust project, including wasm and embedded.
 
 ![](./test/cover.png)
 
+## For AI
+
+使用本工具，可以让“非生图” AI 模型可以“生成图片”
+
+Enables AI models that do not produce raw images to generate images 
+
+### Example
+```prompt
+Use the `canvas-cli` skill to draw a system architecture diagram for an e-commerce platform. It features engineering precision and clear geometry.
+
+Main colors: blue (#2563EB), cyan, gray, white lines
+Background colors: dark blue (#1E3A5F), white or light gray, with a grid
+Embellishing: amber highlights (#F59E0B), cyan annotations
+
+Engineering drawing: blue background with white text, dimensions, grid
+```
+
+![](./test/e-com.png)
+
 ## Anti-aliasing
+
+支持抗锯齿，可以渲染出来更平滑的线条和文字
+
+It supports anti-aliasing, which can render smoother lines and text.
+
 ![](./test/anti-aliasing.png)
 
 ## Use Cli
@@ -115,6 +139,36 @@ func main() {
 
 ```
 cargo run --bin canvas-cli -- --draw --input=./test/input.txt --output=output.png
+```
+
+## round_rect
+
+`round_rect` 用于把圆角矩形追加到当前路径，然后配合 `fill` 或 `stroke` 进行填充/描边。
+
+语法：
+
+```txt
+begin_path
+round_rect <x> <y> <w> <h> <radii>
+fill
+stroke
+```
+
+`<radii>` 支持 1 到 4 个半径值，顺序和 CSS 一样：
+
+- 1 个值：四个角相同
+- 2 个值：左上/右下，右上/左下
+- 3 个值：左上，右上/左下，右下
+- 4 个值：左上，右上，右下，左下
+
+示例：
+
+```txt
+canvas 400 200
+set_fill_style #2563EB
+begin_path
+round_rect 50 40 300 120 24,24,24,24
+fill
 ```
 
 ## License

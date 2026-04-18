@@ -62,7 +62,7 @@ set_text_align <align>
 
 示例：`set_font 32px common`
 
-- `size`：字号（像素），决定文字高度。
+- `size`：字号（像素），决定文字高度（等于 size）和宽度（全角字符等于 size，半角字符为 size / 2）。
 - `family`：字体名，对应 `lib/<family>.txt` 位图字体文件，没有特别指定的情况下使用 common 这个内置字体。
 - 内置字体：`common`（支持 ASCII 及常用中文字符）。
 
@@ -71,6 +71,7 @@ set_text_align <align>
 - `start` / `left`：左对齐（默认），`x` 是文本左边缘。
 - `end` / `right`：右对齐，`x` 是文本右边缘。
 - `center`：居中对齐，`x` 是文本中心点。
+- 绘制文字时的 `y` 坐标始终是文本上方顶部位置，因此生成文本的时候需要特别注意 `y` 坐标的设置，确保文本纵向位置正确。
 
 示例：`set_text_align center`
 
@@ -80,6 +81,38 @@ set_text_align <align>
 
 ```txt
 fill_rect <x> <y> <w> <h>
+
+---
+
+### round_rect
+
+`round_rect` 用于把圆角矩形追加到当前路径中，然后配合 `fill` 或 `stroke` 使用。
+
+语法：
+
+```txt
+begin_path
+round_rect <x> <y> <w> <h> <radii>
+fill
+stroke
+```
+
+`<radii>` 支持 1 到 4 个半径值，顺序和 CSS 一样：
+
+- 1 个值：四个角相同
+- 2 个值：左上/右下，右上/左下
+- 3 个值：左上，右上/左下，右下
+- 4 个值：左上，右上，右下，左下
+
+示例：
+
+```txt
+canvas 400 200
+set_fill_style #2563EB
+begin_path
+round_rect 50 40 300 120 24,24,24,24
+fill
+```
 stroke_rect <x> <y> <w> <h>
 clear_rect <x> <y> <w> <h>
 ```
@@ -101,7 +134,9 @@ fill_text "<text>" <x> <y>
   - `start` / `left`：`x` 是文本左边缘位置。
   - `end` / `right`：`x` 是文本右边缘位置。
   - `center`：`x` 是文本中心位置。
-- `y` 始终是文本顶部位置。
+- `y` 始终是文本上方顶部位置。
+
+示例：`fill_text "Hello, World!" 100 50` 则代表从 `(100, 50)` 开始绘制文本，文本的左上角坐标为 `(100, 50)`。
 
 ---
 

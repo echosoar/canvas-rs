@@ -1,5 +1,14 @@
 use core::f64::consts::PI;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoundRectPath {
+    pub left: f64,
+    pub top: f64,
+    pub width: f64,
+    pub height: f64,
+    pub radii: [f64; 4],
+}
+
 /// A single command in a 2-D path.
 #[derive(Clone, Debug)]
 pub enum PathCommand {
@@ -7,6 +16,7 @@ pub enum PathCommand {
     LineTo(f64, f64),
     /// arc(cx, cy, radius, start_angle, end_angle, counterclockwise)
     Arc(f64, f64, f64, f64, f64, bool),
+    RoundRect(RoundRectPath),
     ClosePath,
 }
 
@@ -68,6 +78,18 @@ impl Path {
                         pen = *pts.last().unwrap();
                     }
                 }
+                PathCommand::RoundRect(round_rect) => {
+                    if current.len() >= 2 {
+                        sub_paths.push(current.clone());
+                    }
+                    current.clear();
+
+                    let pts = round_rect_to_points(round_rect);
+                    if !pts.is_empty() {
+                        pen = pts[0];
+                        sub_paths.push(pts);
+                    }
+                }
                 PathCommand::ClosePath => {
                     if let Some(&first) = current.first() {
                         current.push(first);
@@ -91,6 +113,78 @@ impl Path {
         }
         sub_paths
     }
+
+    pub fn as_round_rect(&self) -> Option<RoundRectPath> {
+        match self.commands.as_slice() {
+            [PathCommand::RoundRect(round_rect)] => Some(*round_rect),
+            [PathCommand::RoundRect(round_rect), PathCommand::ClosePath] => Some(*round_rect),
+            _ => None,
+        }
+    }
+}
+
+fn round_rect_to_points(round_rect: RoundRectPath) -> Vec<(f64, f64)> {
+    let left = round_rect.left;
+    let top = round_rect.top;
+    let right = left + round_rect.width;
+    let bottom = top + round_rect.height;
+    let [top_left, top_right, bottom_right, bottom_left] = round_rect.radii;
+
+    let mut pts = Vec::new();
+    pts.push((left + top_left, top));
+    pts.push((right - top_right, top));
+    if top_right > 0.0 {
+        pts.extend(arc_to_points(
+            right - top_right,
+            top + top_right,
+            top_right,
+            -std::f64::consts::FRAC_PI_2,
+            0.0,
+            false,
+        ).into_iter().skip(1));
+    }
+
+    pts.push((right, bottom - bottom_right));
+    if bottom_right > 0.0 {
+        pts.extend(arc_to_points(
+            right - bottom_right,
+            bottom - bottom_right,
+            bottom_right,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+            false,
+        ).into_iter().skip(1));
+    }
+
+    pts.push((left + bottom_left, bottom));
+    if bottom_left > 0.0 {
+        pts.extend(arc_to_points(
+            left + bottom_left,
+            bottom - bottom_left,
+            bottom_left,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+            false,
+        ).into_iter().skip(1));
+    }
+
+    pts.push((left, top + top_left));
+    if top_left > 0.0 {
+        pts.extend(arc_to_points(
+            left + top_left,
+            top + top_left,
+            top_left,
+            std::f64::consts::PI,
+            std::f64::consts::PI * 1.5,
+            false,
+        ).into_iter().skip(1));
+    }
+
+    if let Some(&first) = pts.first() {
+        pts.push(first);
+    }
+
+    pts
 }
 
 /// Approximate an arc with line segments.

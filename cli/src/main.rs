@@ -32,6 +32,7 @@ fn print_usage() {
     println!("  set_line_width <width>            - Set line width");
     println!("  fill_rect <x> <y> <w> <h>         - Fill a rectangle");
     println!("  stroke_rect <x> <y> <w> <h>       - Stroke a rectangle");
+    println!("  roundRect|round_rect <x> <y> <w> <h> <radii...> - Add a rounded rectangle to the current path");
     println!("  fill_text \"<text>\" <x> <y>       - Fill text at position (x, y)");
     println!("  begin_path                        - Begin a new path");
     println!("  move_to <x> <y>                   - Move to position");
@@ -84,17 +85,84 @@ fn parse_quoted_string(s: &str) -> (String, usize) {
         return (s[..end].to_string(), end);
     }
 
-    // Find closing quote
-    let rest = &s[1..]; // Skip opening quote
-    if let Some(close_pos) = rest.find('"') {
-        let text = &rest[..close_pos];
-        // Return byte index: 1 (opening quote) + text bytes + 1 (closing quote)
-        let consumed = 1 + text.len() + 1;
-        (text.to_string(), consumed)
-    } else {
-        // No closing quote, take all
-        (rest.to_string(), s.len())
+    let mut text = String::new();
+    let mut escaped = false;
+
+    for (idx, ch) in s[1..].char_indices() {
+        if escaped {
+            let unescaped = match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                other => other,
+            };
+            text.push(unescaped);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '"' => return (text, idx + 2),
+            _ => text.push(ch),
+        }
     }
+
+    if escaped {
+        text.push('\\');
+    }
+
+    (text, s.len())
+}
+
+fn split_next_token(s: &str) -> Option<(&str, &str)> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let token_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    let token = &trimmed[..token_end];
+    let rest = trimmed[token_end..].trim();
+    Some((token, rest))
+}
+
+fn is_ignored_command_line(s: &str) -> bool {
+    let trimmed = s.trim();
+    trimmed.is_empty() || trimmed.starts_with('#')
+}
+
+fn first_meaningful_command_index(commands: &[String]) -> Option<usize> {
+    commands
+        .iter()
+        .position(|cmd| !is_ignored_command_line(cmd))
+}
+
+fn parse_number_list(s: &str) -> Vec<f64> {
+    s.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(parse_float)
+        .collect()
+}
+
+fn parse_round_rect_args(s: &str) -> Option<(f64, f64, f64, f64, Vec<f64>)> {
+    let (x, rest) = split_next_token(s)?;
+    let (y, rest) = split_next_token(rest)?;
+    let (width, rest) = split_next_token(rest)?;
+    let (height, rest) = split_next_token(rest)?;
+    let radii = parse_number_list(rest);
+    if radii.is_empty() {
+        return None;
+    }
+
+    Some((
+        parse_float(x),
+        parse_float(y),
+        parse_float(width),
+        parse_float(height),
+        radii,
+    ))
 }
 
 /// Stores either a linear or radial gradient
@@ -109,7 +177,7 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
 
     for cmd in commands {
         let cmd = cmd.trim();
-        if cmd.is_empty() || cmd.starts_with('#') {
+        if is_ignored_command_line(cmd) {
             continue;
         }
 
@@ -171,13 +239,15 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                 }
             }
             "set_fill_style" => {
-                if parts.len() >= 2 {
-                    ctx.set_fill_style(parts[1]);
+                let style = cmd[op.len()..].trim();
+                if !style.is_empty() {
+                    ctx.set_fill_style(style);
                 }
             }
             "set_stroke_style" => {
-                if parts.len() >= 2 {
-                    ctx.set_stroke_style(parts[1]);
+                let style = cmd[op.len()..].trim();
+                if !style.is_empty() {
+                    ctx.set_stroke_style(style);
                 }
             }
             "set_font" => {
@@ -219,6 +289,11 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                     let w = parse_float(parts[3]);
                     let h = parse_float(parts[4]);
                     ctx.stroke_rect(x, y, w, h);
+                }
+            }
+            "round_rect" | "roundRect" => {
+                if let Some((x, y, width, height, radii)) = parse_round_rect_args(cmd[op.len()..].trim()) {
+                    ctx.round_rect(x, y, width, height, &radii);
                 }
             }
             "fill_text" => {
@@ -302,17 +377,20 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                 }
             }
             "add_color_stop" => {
-                if parts.len() >= 4 {
-                    let id = parts[1];
-                    let offset = parse_float(parts[2]);
-                    let color = parts[3];
-                    if let Some(gradient) = gradients.get_mut(id) {
-                        match gradient {
-                            Gradient::Linear(g) => g.add_color_stop(offset, color),
-                            Gradient::Radial(g) => g.add_color_stop(offset, color),
+                let rest = cmd[op.len()..].trim();
+                if let Some((id, rest)) = split_next_token(rest) {
+                    if let Some((offset, color)) = split_next_token(rest) {
+                        if color.is_empty() {
+                            continue;
                         }
-                    } else {
-                        eprintln!("Warning: Gradient '{}' not found", id);
+                        if let Some(gradient) = gradients.get_mut(id) {
+                            match gradient {
+                                Gradient::Linear(g) => g.add_color_stop(parse_float(offset), color),
+                                Gradient::Radial(g) => g.add_color_stop(parse_float(offset), color),
+                            }
+                        } else {
+                            eprintln!("Warning: Gradient '{}' not found", id);
+                        }
                     }
                 }
             }
@@ -392,7 +470,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let first_line = commands[0].trim();
+    let canvas_index = match first_meaningful_command_index(&commands) {
+        Some(index) => index,
+        None => {
+            eprintln!("Error: No commands found");
+            std::process::exit(1);
+        }
+    };
+
+    let first_line = commands[canvas_index].trim();
     let canvas_parts: Vec<&str> = first_line.split_whitespace().collect();
 
     if canvas_parts.is_empty() || canvas_parts[0] != "canvas" {
@@ -412,7 +498,7 @@ fn main() {
     let mut ctx = canvas.get_context("2d").expect("Failed to get 2d context");
 
     // Execute remaining commands
-    execute_commands(&mut ctx, &commands[1..], &base_path);
+    execute_commands(&mut ctx, &commands[canvas_index + 1..], &base_path);
 
     // Output
     let png_bytes = images::to_blob(&canvas);
@@ -453,4 +539,131 @@ fn base64_encode(data: &[u8]) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_meaningful_command_index_skips_blank_and_comment_lines() {
+        let commands = vec![
+            "".to_string(),
+            "   ".to_string(),
+            "# generated by script".to_string(),
+            "  # keep this note".to_string(),
+            "canvas 200 100".to_string(),
+            "fill_rect 0 0 10 10".to_string(),
+        ];
+
+        assert_eq!(first_meaningful_command_index(&commands), Some(4));
+    }
+
+    #[test]
+    fn first_meaningful_command_index_returns_none_when_only_comments_exist() {
+        let commands = vec!["".to_string(), " # comment".to_string(), "   ".to_string()];
+
+        assert_eq!(first_meaningful_command_index(&commands), None);
+    }
+
+    #[test]
+    fn split_next_token_preserves_remaining_text() {
+        let (token, rest) = split_next_token("gradient 0.5 rgba(255, 0, 0, 0.08)").unwrap();
+        assert_eq!(token, "gradient");
+        assert_eq!(rest, "0.5 rgba(255, 0, 0, 0.08)");
+    }
+
+    #[test]
+    fn execute_commands_accepts_fill_style_with_spaces() {
+        let canvas = Canvas::new(1, 1);
+        let mut ctx = canvas.get_context("2d").unwrap();
+        let commands = vec![
+            "set_fill_style rgba(255, 0, 0, 0.08)".to_string(),
+            "fill_rect 0 0 1 1".to_string(),
+        ];
+
+        execute_commands(&mut ctx, &commands, Path::new("."));
+
+        let pixel = canvas.get_image_data().get_pixel(0, 0);
+        assert_eq!(pixel.r, 255);
+        assert_eq!(pixel.g, 0);
+        assert_eq!(pixel.b, 0);
+        assert_eq!(pixel.a, 20);
+    }
+
+    #[test]
+    fn execute_commands_accepts_gradient_color_stop_with_spaces() {
+        let canvas = Canvas::new(1, 1);
+        let mut ctx = canvas.get_context("2d").unwrap();
+        let commands = vec![
+            "create_linear_gradient g 0 0 1 0".to_string(),
+            "add_color_stop g 0 rgba(255, 0, 0, 0.08)".to_string(),
+            "add_color_stop g 1 rgba(0, 0, 255, 0.16)".to_string(),
+            "set_fill_gradient g".to_string(),
+            "fill_rect 0 0 1 1".to_string(),
+        ];
+
+        execute_commands(&mut ctx, &commands, Path::new("."));
+
+        let pixel = canvas.get_image_data().get_pixel(0, 0);
+        assert_eq!(pixel.r, 255);
+        assert_eq!(pixel.g, 0);
+        assert_eq!(pixel.b, 0);
+        assert_eq!(pixel.a, 20);
+    }
+
+    #[test]
+    fn execute_commands_supports_round_rect_path() {
+        let canvas = Canvas::new(16, 16);
+        let mut ctx = canvas.get_context("2d").unwrap();
+        let commands = vec![
+            "set_fill_style red".to_string(),
+            "begin_path".to_string(),
+            "roundRect 2 2 12 12 4,4,4,4".to_string(),
+            "fill".to_string(),
+        ];
+
+        execute_commands(&mut ctx, &commands, Path::new("."));
+
+        let image = canvas.get_image_data();
+        assert_eq!(image.get_pixel(8, 8).r, 255);
+        assert_eq!(image.get_pixel(2, 2).a, 0);
+    }
+
+    #[test]
+    fn parse_quoted_string_unescapes_common_sequences() {
+        let (text, consumed) = parse_quoted_string("\"A\\nB\\t\\\"C\\\"\" 10 20");
+
+        assert_eq!(text, "A\nB\t\"C\"");
+        assert_eq!(consumed, 13);
+    }
+
+    #[test]
+    fn execute_commands_fill_text_unescapes_newline_sequences() {
+        let multiline_canvas = Canvas::new(64, 48);
+        let mut multiline_ctx = multiline_canvas.get_context("2d").unwrap();
+        let multiline_commands = vec![
+            "set_fill_style black".to_string(),
+            "set_font 16px common".to_string(),
+            "fill_text \"A\\nB\" 4 4".to_string(),
+        ];
+
+        execute_commands(&mut multiline_ctx, &multiline_commands, Path::new("."));
+
+        let manual_canvas = Canvas::new(64, 48);
+        let mut manual_ctx = manual_canvas.get_context("2d").unwrap();
+        let manual_commands = vec![
+            "set_fill_style black".to_string(),
+            "set_font 16px common".to_string(),
+            "fill_text \"A\" 4 4".to_string(),
+            "fill_text \"B\" 4 20".to_string(),
+        ];
+
+        execute_commands(&mut manual_ctx, &manual_commands, Path::new("."));
+
+        assert_eq!(
+            multiline_canvas.get_image_data().data,
+            manual_canvas.get_image_data().data,
+        );
+    }
 }

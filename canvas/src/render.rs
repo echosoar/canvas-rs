@@ -6,6 +6,10 @@
 use crate::color::Color;
 use crate::gradient::Style;
 use crate::image::ImageData;
+use crate::path::RoundRectPath;
+
+const SHAPE_AA_GRID: usize = 4;
+const GEOMETRY_EPSILON: f64 = 1e-9;
 
 // ── Pixel helpers ────────────────────────────────────────────────────────────
 
@@ -566,6 +570,17 @@ pub fn put_pixel_style(
             return;
         }
     }
+    if let Style::Color(color) = style {
+        let base = idx * 4;
+        let dst_a = buf[base + 3];
+        if color.a == 255 || dst_a == 0 {
+            buf[base] = color.r;
+            buf[base + 1] = color.g;
+            buf[base + 2] = color.b;
+            buf[base + 3] = color.a;
+            return;
+        }
+    }
     // Get color at this pixel position for gradient support
     let color = style.color_at(x as f64, y as f64);
     let base = idx * 4;
@@ -605,6 +620,12 @@ pub fn put_pixel_style_coverage(
         }
     }
 
+    if let Style::Color(color) = style {
+        let alpha = ((color.a as f64) * coverage.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8;
+        put_pixel_color_coverage_u8(buf, width, height, x, y, *color, alpha, clip);
+        return;
+    }
+
     let cov = coverage.clamp(0.0, 1.0);
     let mut color = style.color_at(x as f64, y as f64);
     if cov < 1.0 {
@@ -623,6 +644,90 @@ pub fn put_pixel_style_coverage(
     buf[base + 3] = result.a;
 }
 
+/// Set a pixel using a solid color and a coverage factor in [0, 1].
+///
+/// This avoids per-pixel style dispatch for hot solid-color text rendering.
+#[inline]
+pub fn put_pixel_color_coverage(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x: i64,
+    y: i64,
+    color: Color,
+    coverage: f64,
+    clip: &Option<Vec<bool>>,
+) {
+    if coverage <= 0.0 {
+        return;
+    }
+    let alpha = ((color.a as f64) * coverage.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8;
+    put_pixel_color_coverage_u8(buf, width, height, x, y, color, alpha, clip);
+}
+
+/// Set a pixel using a solid color and a precomputed alpha value in [0, 255].
+#[inline]
+pub fn put_pixel_color_coverage_u8(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    x: i64,
+    y: i64,
+    color: Color,
+    alpha: u8,
+    clip: &Option<Vec<bool>>,
+) {
+    if alpha == 0 {
+        return;
+    }
+    if x < 0 || y < 0 || x >= width as i64 || y >= height as i64 {
+        return;
+    }
+    let idx = (y as u32 * width + x as u32) as usize;
+    if let Some(mask) = clip {
+        if !mask[idx] {
+            return;
+        }
+    }
+
+    let base = idx * 4;
+    let dst_a = buf[base + 3] as u32;
+    if dst_a == 0 {
+        buf[base] = color.r;
+        buf[base + 1] = color.g;
+        buf[base + 2] = color.b;
+        buf[base + 3] = alpha;
+        return;
+    }
+
+    if alpha == 255 {
+        buf[base] = color.r;
+        buf[base + 1] = color.g;
+        buf[base + 2] = color.b;
+        buf[base + 3] = 255;
+        return;
+    }
+
+    let sa = alpha as u32;
+    let inv_sa = 255 - sa;
+    let out_a = sa + dst_a * inv_sa / 255;
+    if out_a == 0 {
+        buf[base] = 0;
+        buf[base + 1] = 0;
+        buf[base + 2] = 0;
+        buf[base + 3] = 0;
+        return;
+    }
+
+    let dst_r = buf[base] as u32;
+    let dst_g = buf[base + 1] as u32;
+    let dst_b = buf[base + 2] as u32;
+    buf[base] = ((color.r as u32 * sa + dst_r * dst_a * inv_sa / 255) / out_a) as u8;
+    buf[base + 1] = ((color.g as u32 * sa + dst_g * dst_a * inv_sa / 255) / out_a) as u8;
+    buf[base + 2] = ((color.b as u32 * sa + dst_b * dst_a * inv_sa / 255) / out_a) as u8;
+    buf[base + 3] = out_a.min(255) as u8;
+}
+
 /// Fill an axis-aligned rectangle with a Style.
 pub fn fill_rect_style(
     buf: &mut Vec<u8>,
@@ -635,13 +740,51 @@ pub fn fill_rect_style(
     style: &Style,
     clip: &Option<Vec<bool>>,
 ) {
-    let x0 = x.floor() as i64;
-    let y0 = y.floor() as i64;
-    let x1 = (x + w).ceil() as i64;
-    let y1 = (y + h).ceil() as i64;
+    if w == 0.0 || h == 0.0 {
+        return;
+    }
+
+    let left = x.min(x + w);
+    let right = x.max(x + w);
+    let top = y.min(y + h);
+    let bottom = y.max(y + h);
+
+    if is_nearly_integer(left)
+        && is_nearly_integer(right)
+        && is_nearly_integer(top)
+        && is_nearly_integer(bottom)
+    {
+        let x0 = left.round() as i64;
+        let y0 = top.round() as i64;
+        let x1 = right.round() as i64;
+        let y1 = bottom.round() as i64;
+        for py in y0..y1 {
+            for px in x0..x1 {
+                put_pixel_style(buf, width, height, px, py, style, clip);
+            }
+        }
+        return;
+    }
+
+    let x0 = left.floor() as i64;
+    let y0 = top.floor() as i64;
+    let x1 = right.ceil() as i64;
+    let y1 = bottom.ceil() as i64;
     for py in y0..y1 {
+        let pixel_top = py as f64;
+        let pixel_bottom = pixel_top + 1.0;
+        let overlap_y = (bottom.min(pixel_bottom) - top.max(pixel_top)).clamp(0.0, 1.0);
+        if overlap_y <= 0.0 {
+            continue;
+        }
         for px in x0..x1 {
-            put_pixel_style(buf, width, height, px, py, style, clip);
+            let pixel_left = px as f64;
+            let pixel_right = pixel_left + 1.0;
+            let overlap_x = (right.min(pixel_right) - left.max(pixel_left)).clamp(0.0, 1.0);
+            let coverage = overlap_x * overlap_y;
+            if coverage > 0.0 {
+                put_pixel_style_coverage(buf, width, height, px, py, style, coverage, clip);
+            }
         }
     }
 }
@@ -678,15 +821,21 @@ fn fill_disc_style(
     style: &Style,
     clip: &Option<Vec<bool>>,
 ) {
-    let r = radius.ceil() as i64;
-    let cx_i = cx.round() as i64;
-    let cy_i = cy.round() as i64;
     let r2 = radius * radius;
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let d2 = (dx * dx + dy * dy) as f64;
-            if d2 <= r2 + 0.5 {
-                put_pixel_style(buf, width, height, cx_i + dx, cy_i + dy, style, clip);
+    let x0 = (cx - radius).floor() as i64;
+    let y0 = (cy - radius).floor() as i64;
+    let x1 = (cx + radius).ceil() as i64;
+    let y1 = (cy + radius).ceil() as i64;
+
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let coverage = supersample_pixel_coverage(px, py, |sample_x, sample_y| {
+                let dx = sample_x - cx;
+                let dy = sample_y - cy;
+                dx * dx + dy * dy <= r2
+            });
+            if coverage > 0.0 {
+                put_pixel_style_coverage(buf, width, height, px, py, style, coverage, clip);
             }
         }
     }
@@ -710,6 +859,17 @@ pub fn draw_thick_line_style(
 
     let dx = x1 - x0;
     let dy = y1 - y0;
+    if let Some((left, top, width_rect, height_rect, round_caps)) =
+        axis_aligned_line_rect(x0, y0, x1, y1, hw, cap)
+    {
+        fill_rect_style(buf, width, height, left, top, width_rect, height_rect, style, clip);
+        if round_caps {
+            fill_disc_style(buf, width, height, x0, y0, hw, style, clip);
+            fill_disc_style(buf, width, height, x1, y1, hw, style, clip);
+        }
+        return;
+    }
+
     let len = (dx * dx + dy * dy).sqrt();
 
     if len < 1e-9 {
@@ -766,34 +926,24 @@ pub fn fill_polygon_style(
     if pts.len() < 3 {
         return;
     }
+    let min_x = pts.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let max_x = pts.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
     let min_y = pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
     let max_y = pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
 
+    let x_start = min_x.floor() as i64;
+    let x_end = max_x.ceil() as i64;
     let y_start = min_y.floor() as i64;
     let y_end = max_y.ceil() as i64;
 
-    let n = pts.len();
-
-    for py in y_start..=y_end {
-        let fy = py as f64 + 0.5;
-        let mut crossings: Vec<f64> = Vec::new();
-        for i in 0..n {
-            let (x0, y0) = pts[i];
-            let (x1, y1) = pts[(i + 1) % n];
-            if (y0 <= fy && y1 > fy) || (y1 <= fy && y0 > fy) {
-                let t = (fy - y0) / (y1 - y0);
-                crossings.push(x0 + t * (x1 - x0));
+    for py in y_start..y_end {
+        for px in x_start..x_end {
+            let coverage = supersample_pixel_coverage(px, py, |sample_x, sample_y| {
+                point_in_polygon_even_odd(pts, sample_x, sample_y)
+            });
+            if coverage > 0.0 {
+                put_pixel_style_coverage(buf, width, height, px, py, style, coverage, clip);
             }
-        }
-        crossings.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let mut i = 0;
-        while i + 1 < crossings.len() {
-            let xa = crossings[i].floor() as i64;
-            let xb = crossings[i + 1].ceil() as i64;
-            for px in xa..xb {
-                put_pixel_style(buf, width, height, px, py, style, clip);
-            }
-            i += 2;
         }
     }
 }
@@ -899,6 +1049,202 @@ pub fn fill_subpath_style(
         }
     }
     fill_polygon_style(buf, width, height, &polygon, style, clip);
+}
+
+pub fn fill_round_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    rasterize_round_rect(buf, width, height, round_rect, style, clip, None);
+}
+
+pub fn stroke_round_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    line_width: f64,
+    clip: &Option<Vec<bool>>,
+) {
+    if line_width <= 0.0 {
+        return;
+    }
+    rasterize_round_rect(buf, width, height, round_rect, style, clip, Some(line_width / 2.0));
+}
+
+fn rasterize_round_rect(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+    stroke_half_width: Option<f64>,
+) {
+    let outer = round_rect_sample_bounds(round_rect, stroke_half_width.unwrap_or(0.0));
+    for py in outer.2..outer.3 {
+        for px in outer.0..outer.1 {
+            let coverage = supersample_pixel_coverage(px, py, |sample_x, sample_y| {
+                let inside_outer = point_in_round_rect(round_rect, sample_x, sample_y, stroke_half_width.unwrap_or(0.0));
+                if !inside_outer {
+                    return false;
+                }
+
+                if let Some(half_width) = stroke_half_width {
+                    return !point_in_round_rect(round_rect, sample_x, sample_y, -half_width);
+                }
+
+                true
+            });
+            if coverage > 0.0 {
+                put_pixel_style_coverage(buf, width, height, px, py, style, coverage, clip);
+            }
+        }
+    }
+}
+
+fn round_rect_sample_bounds(round_rect: RoundRectPath, expand: f64) -> (i64, i64, i64, i64) {
+    let left = round_rect.left - expand;
+    let top = round_rect.top - expand;
+    let right = round_rect.left + round_rect.width + expand;
+    let bottom = round_rect.top + round_rect.height + expand;
+    (
+        left.floor() as i64,
+        right.ceil() as i64,
+        top.floor() as i64,
+        bottom.ceil() as i64,
+    )
+}
+
+fn point_in_round_rect(round_rect: RoundRectPath, x: f64, y: f64, expand: f64) -> bool {
+    let left = round_rect.left - expand;
+    let top = round_rect.top - expand;
+    let right = round_rect.left + round_rect.width + expand;
+    let bottom = round_rect.top + round_rect.height + expand;
+
+    if left >= right || top >= bottom || x < left || x > right || y < top || y > bottom {
+        return false;
+    }
+
+    let radii = [
+        (round_rect.radii[0] + expand).max(0.0),
+        (round_rect.radii[1] + expand).max(0.0),
+        (round_rect.radii[2] + expand).max(0.0),
+        (round_rect.radii[3] + expand).max(0.0),
+    ];
+
+    if x < left + radii[0] && y < top + radii[0] {
+        return point_in_corner_circle(x, y, left + radii[0], top + radii[0], radii[0]);
+    }
+    if x > right - radii[1] && y < top + radii[1] {
+        return point_in_corner_circle(x, y, right - radii[1], top + radii[1], radii[1]);
+    }
+    if x > right - radii[2] && y > bottom - radii[2] {
+        return point_in_corner_circle(x, y, right - radii[2], bottom - radii[2], radii[2]);
+    }
+    if x < left + radii[3] && y > bottom - radii[3] {
+        return point_in_corner_circle(x, y, left + radii[3], bottom - radii[3], radii[3]);
+    }
+
+    true
+}
+
+#[inline]
+fn point_in_corner_circle(x: f64, y: f64, cx: f64, cy: f64, radius: f64) -> bool {
+    if radius <= 0.0 {
+        return true;
+    }
+
+    let dx = x - cx;
+    let dy = y - cy;
+    dx * dx + dy * dy <= radius * radius
+}
+
+#[inline]
+fn supersample_pixel_coverage<F>(px: i64, py: i64, mut contains: F) -> f64
+where
+    F: FnMut(f64, f64) -> bool,
+{
+    let mut covered = 0usize;
+    let total = SHAPE_AA_GRID * SHAPE_AA_GRID;
+    let pxf = px as f64;
+    let pyf = py as f64;
+
+    for sy in 0..SHAPE_AA_GRID {
+        for sx in 0..SHAPE_AA_GRID {
+            let sample_x = pxf + (sx as f64 + 0.5) / SHAPE_AA_GRID as f64;
+            let sample_y = pyf + (sy as f64 + 0.5) / SHAPE_AA_GRID as f64;
+            if contains(sample_x, sample_y) {
+                covered += 1;
+            }
+        }
+    }
+
+    covered as f64 / total as f64
+}
+
+#[inline]
+fn is_nearly_integer(value: f64) -> bool {
+    (value - value.round()).abs() <= GEOMETRY_EPSILON
+}
+
+#[inline]
+fn axis_aligned_line_rect(
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    hw: f64,
+    cap: LineCap,
+) -> Option<(f64, f64, f64, f64, bool)> {
+    if (x0 - x1).abs() <= GEOMETRY_EPSILON {
+        let mut top = y0.min(y1);
+        let mut bottom = y0.max(y1);
+        let left = x0 - hw;
+        let width = hw * 2.0;
+        let round_caps = cap == LineCap::Round;
+        if cap == LineCap::Square {
+            top -= hw;
+            bottom += hw;
+        }
+        return Some((left, top, width, bottom - top, round_caps));
+    }
+
+    if (y0 - y1).abs() <= GEOMETRY_EPSILON {
+        let mut left = x0.min(x1);
+        let mut right = x0.max(x1);
+        let top = y0 - hw;
+        let height = hw * 2.0;
+        let round_caps = cap == LineCap::Round;
+        if cap == LineCap::Square {
+            left -= hw;
+            right += hw;
+        }
+        return Some((left, top, right - left, height, round_caps));
+    }
+
+    None
+}
+
+#[inline]
+fn point_in_polygon_even_odd(pts: &[(f64, f64)], x: f64, y: f64) -> bool {
+    let mut inside = false;
+    let n = pts.len();
+    for i in 0..n {
+        let (x0, y0) = pts[i];
+        let (x1, y1) = pts[(i + 1) % n];
+        let intersects = ((y0 > y) != (y1 > y))
+            && (x < (x1 - x0) * (y - y0) / ((y1 - y0).abs().max(f64::EPSILON) * (if y1 >= y0 { 1.0 } else { -1.0 })) + x0);
+        if intersects {
+            inside = !inside;
+        }
+    }
+    inside
 }
 
 
