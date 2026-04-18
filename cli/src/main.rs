@@ -85,17 +85,36 @@ fn parse_quoted_string(s: &str) -> (String, usize) {
         return (s[..end].to_string(), end);
     }
 
-    // Find closing quote
-    let rest = &s[1..]; // Skip opening quote
-    if let Some(close_pos) = rest.find('"') {
-        let text = &rest[..close_pos];
-        // Return byte index: 1 (opening quote) + text bytes + 1 (closing quote)
-        let consumed = 1 + text.len() + 1;
-        (text.to_string(), consumed)
-    } else {
-        // No closing quote, take all
-        (rest.to_string(), s.len())
+    let mut text = String::new();
+    let mut escaped = false;
+
+    for (idx, ch) in s[1..].char_indices() {
+        if escaped {
+            let unescaped = match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                other => other,
+            };
+            text.push(unescaped);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '"' => return (text, idx + 2),
+            _ => text.push(ch),
+        }
     }
+
+    if escaped {
+        text.push('\\');
+    }
+
+    (text, s.len())
 }
 
 fn split_next_token(s: &str) -> Option<(&str, &str)> {
@@ -609,5 +628,42 @@ mod tests {
         let image = canvas.get_image_data();
         assert_eq!(image.get_pixel(8, 8).r, 255);
         assert_eq!(image.get_pixel(2, 2).a, 0);
+    }
+
+    #[test]
+    fn parse_quoted_string_unescapes_common_sequences() {
+        let (text, consumed) = parse_quoted_string("\"A\\nB\\t\\\"C\\\"\" 10 20");
+
+        assert_eq!(text, "A\nB\t\"C\"");
+        assert_eq!(consumed, 13);
+    }
+
+    #[test]
+    fn execute_commands_fill_text_unescapes_newline_sequences() {
+        let multiline_canvas = Canvas::new(64, 48);
+        let mut multiline_ctx = multiline_canvas.get_context("2d").unwrap();
+        let multiline_commands = vec![
+            "set_fill_style black".to_string(),
+            "set_font 16px common".to_string(),
+            "fill_text \"A\\nB\" 4 4".to_string(),
+        ];
+
+        execute_commands(&mut multiline_ctx, &multiline_commands, Path::new("."));
+
+        let manual_canvas = Canvas::new(64, 48);
+        let mut manual_ctx = manual_canvas.get_context("2d").unwrap();
+        let manual_commands = vec![
+            "set_fill_style black".to_string(),
+            "set_font 16px common".to_string(),
+            "fill_text \"A\" 4 4".to_string(),
+            "fill_text \"B\" 4 20".to_string(),
+        ];
+
+        execute_commands(&mut manual_ctx, &manual_commands, Path::new("."));
+
+        assert_eq!(
+            multiline_canvas.get_image_data().data,
+            manual_canvas.get_image_data().data,
+        );
     }
 }

@@ -6,6 +6,7 @@
 use crate::color::Color;
 use crate::gradient::Style;
 use crate::image::ImageData;
+use crate::path::RoundRectPath;
 
 const SHAPE_AA_GRID: usize = 4;
 const GEOMETRY_EPSILON: f64 = 1e-9;
@@ -1048,6 +1049,120 @@ pub fn fill_subpath_style(
         }
     }
     fill_polygon_style(buf, width, height, &polygon, style, clip);
+}
+
+pub fn fill_round_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+) {
+    rasterize_round_rect(buf, width, height, round_rect, style, clip, None);
+}
+
+pub fn stroke_round_rect_style(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    line_width: f64,
+    clip: &Option<Vec<bool>>,
+) {
+    if line_width <= 0.0 {
+        return;
+    }
+    rasterize_round_rect(buf, width, height, round_rect, style, clip, Some(line_width / 2.0));
+}
+
+fn rasterize_round_rect(
+    buf: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    round_rect: RoundRectPath,
+    style: &Style,
+    clip: &Option<Vec<bool>>,
+    stroke_half_width: Option<f64>,
+) {
+    let outer = round_rect_sample_bounds(round_rect, stroke_half_width.unwrap_or(0.0));
+    for py in outer.2..outer.3 {
+        for px in outer.0..outer.1 {
+            let coverage = supersample_pixel_coverage(px, py, |sample_x, sample_y| {
+                let inside_outer = point_in_round_rect(round_rect, sample_x, sample_y, stroke_half_width.unwrap_or(0.0));
+                if !inside_outer {
+                    return false;
+                }
+
+                if let Some(half_width) = stroke_half_width {
+                    return !point_in_round_rect(round_rect, sample_x, sample_y, -half_width);
+                }
+
+                true
+            });
+            if coverage > 0.0 {
+                put_pixel_style_coverage(buf, width, height, px, py, style, coverage, clip);
+            }
+        }
+    }
+}
+
+fn round_rect_sample_bounds(round_rect: RoundRectPath, expand: f64) -> (i64, i64, i64, i64) {
+    let left = round_rect.left - expand;
+    let top = round_rect.top - expand;
+    let right = round_rect.left + round_rect.width + expand;
+    let bottom = round_rect.top + round_rect.height + expand;
+    (
+        left.floor() as i64,
+        right.ceil() as i64,
+        top.floor() as i64,
+        bottom.ceil() as i64,
+    )
+}
+
+fn point_in_round_rect(round_rect: RoundRectPath, x: f64, y: f64, expand: f64) -> bool {
+    let left = round_rect.left - expand;
+    let top = round_rect.top - expand;
+    let right = round_rect.left + round_rect.width + expand;
+    let bottom = round_rect.top + round_rect.height + expand;
+
+    if left >= right || top >= bottom || x < left || x > right || y < top || y > bottom {
+        return false;
+    }
+
+    let radii = [
+        (round_rect.radii[0] + expand).max(0.0),
+        (round_rect.radii[1] + expand).max(0.0),
+        (round_rect.radii[2] + expand).max(0.0),
+        (round_rect.radii[3] + expand).max(0.0),
+    ];
+
+    if x < left + radii[0] && y < top + radii[0] {
+        return point_in_corner_circle(x, y, left + radii[0], top + radii[0], radii[0]);
+    }
+    if x > right - radii[1] && y < top + radii[1] {
+        return point_in_corner_circle(x, y, right - radii[1], top + radii[1], radii[1]);
+    }
+    if x > right - radii[2] && y > bottom - radii[2] {
+        return point_in_corner_circle(x, y, right - radii[2], bottom - radii[2], radii[2]);
+    }
+    if x < left + radii[3] && y > bottom - radii[3] {
+        return point_in_corner_circle(x, y, left + radii[3], bottom - radii[3], radii[3]);
+    }
+
+    true
+}
+
+#[inline]
+fn point_in_corner_circle(x: f64, y: f64, cx: f64, cy: f64, radius: f64) -> bool {
+    if radius <= 0.0 {
+        return true;
+    }
+
+    let dx = x - cx;
+    let dy = y - cy;
+    dx * dx + dy * dy <= radius * radius
 }
 
 #[inline]

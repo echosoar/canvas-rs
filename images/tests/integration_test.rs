@@ -697,3 +697,21 @@ fn font_render_three_lines_with_nested_rects() {
     assert_eq!(decoded.height, 200);
     println!("Generated PNG data URL:\n{}", url);
 }
+
+#[test]
+fn fill_text_with_newlines_renders_as_multiple_lines() {
+    let multiline_canvas = Canvas::new(120, 80);
+    let mut multiline_ctx = multiline_canvas.get_context("2d").unwrap();
+    multiline_ctx.set_fill_style("black");
+    multiline_ctx.set_font("16px common");
+    multiline_ctx.fill_text("A\nB", 10.0, 10.0);
+
+    let manual_canvas = Canvas::new(120, 80);
+    let mut manual_ctx = manual_canvas.get_context("2d").unwrap();
+    manual_ctx.set_fill_style("black");
+    manual_ctx.set_font("16px common");
+    manual_ctx.fill_text("A", 10.0, 10.0);
+    manual_ctx.fill_text("B", 10.0, 26.0);
+
+    assert_eq!(multiline_canvas.get_image_data().data, manual_canvas.get_image_data().data);
+}

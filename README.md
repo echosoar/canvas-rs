@@ -1,9 +1,33 @@
-# canvas-rs
+# canvas-cli
 pure rust implemented drawer library( api like canvas), and no dependencies, super lightweight, can be used in any rust project, including wasm and embedded.
 
 ![](./test/cover.png)
 
+## For AI
+
+使用本工具，可以让“非生图” AI 模型可以“生成图片”
+
+Enables AI models that do not produce raw images to generate images 
+
+### Example
+```prompt
+Use the `canvas-cli` skill to draw a system architecture diagram for an e-commerce platform. It features engineering precision and clear geometry.
+
+Main colors: blue (#2563EB), cyan, gray, white lines
+Background colors: dark blue (#1E3A5F), white or light gray, with a grid
+Embellishing: amber highlights (#F59E0B), cyan annotations
+
+Engineering drawing: blue background with white text, dimensions, grid
+```
+
+![](./test/e-com.png)
+
 ## Anti-aliasing
+
+支持抗锯齿，可以渲染出来更平滑的线条和文字
+
+It supports anti-aliasing, which can render smoother lines and text.
+
 ![](./test/anti-aliasing.png)
 
 ## Use Cli

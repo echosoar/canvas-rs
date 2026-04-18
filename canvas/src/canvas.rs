@@ -7,7 +7,7 @@ use crate::font::Font;
 use crate::font::CharBitmap;
 use crate::gradient::{LinearGradient, RadialGradient, Style};
 use crate::image::ImageData;
-use crate::path::{Path, PathCommand};
+use crate::path::{Path, PathCommand, RoundRectPath};
 use crate::render::{self, LineCap, TextAlign};
 
 thread_local! {
@@ -392,56 +392,18 @@ impl Context2D {
         let rect_height = bottom - top;
         let radii = normalize_round_rect_radii(rect_width, rect_height, radii);
 
-        self.move_to(left + radii.top_left, top);
-        self.line_to(right - radii.top_right, top);
-        if radii.top_right > 0.0 {
-            self.arc(
-                right - radii.top_right,
-                top + radii.top_right,
-                radii.top_right,
-                -std::f64::consts::FRAC_PI_2,
-                0.0,
-                false,
-            );
-        }
-
-        self.line_to(right, bottom - radii.bottom_right);
-        if radii.bottom_right > 0.0 {
-            self.arc(
-                right - radii.bottom_right,
-                bottom - radii.bottom_right,
-                radii.bottom_right,
-                0.0,
-                std::f64::consts::FRAC_PI_2,
-                false,
-            );
-        }
-
-        self.line_to(left + radii.bottom_left, bottom);
-        if radii.bottom_left > 0.0 {
-            self.arc(
-                left + radii.bottom_left,
-                bottom - radii.bottom_left,
-                radii.bottom_left,
-                std::f64::consts::FRAC_PI_2,
-                std::f64::consts::PI,
-                false,
-            );
-        }
-
-        self.line_to(left, top + radii.top_left);
-        if radii.top_left > 0.0 {
-            self.arc(
-                left + radii.top_left,
-                top + radii.top_left,
+        self.path.commands.push(PathCommand::RoundRect(RoundRectPath {
+            left,
+            top,
+            width: rect_width,
+            height: rect_height,
+            radii: [
                 radii.top_left,
-                std::f64::consts::PI,
-                std::f64::consts::PI * 1.5,
-                false,
-            );
-        }
-
-        self.close_path();
+                radii.top_right,
+                radii.bottom_right,
+                radii.bottom_left,
+            ],
+        }));
     }
 
     /// Close the current sub-path by adding a straight line back to its start.
@@ -451,6 +413,19 @@ impl Context2D {
 
     /// Fill the interior of the current path with `fillStyle`.
     pub fn fill(&mut self) {
+        if let Some(round_rect) = self.path.as_round_rect() {
+            let style = self.fill_style.clone();
+            render::fill_round_rect_style(
+                &mut self.buffer.borrow_mut(),
+                self.width,
+                self.height,
+                round_rect,
+                &style,
+                &self.clip,
+            );
+            return;
+        }
+
         let sub_paths = self.path.flatten();
         let style = self.fill_style.clone();
         let mut buf = self.buffer.borrow_mut();
@@ -461,6 +436,20 @@ impl Context2D {
 
     /// Stroke the outline of the current path with `strokeStyle`.
     pub fn stroke(&mut self) {
+        if let Some(round_rect) = self.path.as_round_rect() {
+            let style = self.stroke_style.clone();
+            render::stroke_round_rect_style(
+                &mut self.buffer.borrow_mut(),
+                self.width,
+                self.height,
+                round_rect,
+                &style,
+                self.line_width,
+                &self.clip,
+            );
+            return;
+        }
+
         let sub_paths = self.path.flatten();
         let style = self.stroke_style.clone();
         let lw = self.line_width;
@@ -629,6 +618,168 @@ impl Context2D {
         let xi = x.round() as isize;
         let yi = y.round() as isize;
         Self::bitmap_value_at(bitmap, xi, yi)
+    }
+
+    #[inline]
+    fn coverage_value_at(coverage: &[u8], width: usize, height: usize, x: isize, y: isize) -> f64 {
+        if x < 0 || y < 0 {
+            return 0.0;
+        }
+        let xu = x as usize;
+        let yu = y as usize;
+        if xu >= width || yu >= height {
+            return 0.0;
+        }
+        coverage[yu * width + xu] as f64 / 255.0
+    }
+
+    #[inline]
+    fn sample_coverage_bilinear(coverage: &[u8], width: usize, height: usize, x: f64, y: f64) -> f64 {
+        let x0 = x.floor() as isize;
+        let y0 = y.floor() as isize;
+        let x1 = x0 + 1;
+        let y1 = y0 + 1;
+
+        let tx = x - x0 as f64;
+        let ty = y - y0 as f64;
+
+        let v00 = Self::coverage_value_at(coverage, width, height, x0, y0);
+        let v10 = Self::coverage_value_at(coverage, width, height, x1, y0);
+        let v01 = Self::coverage_value_at(coverage, width, height, x0, y1);
+        let v11 = Self::coverage_value_at(coverage, width, height, x1, y1);
+
+        let v0 = v00 * (1.0 - tx) + v10 * tx;
+        let v1 = v01 * (1.0 - tx) + v11 * tx;
+        (v0 * (1.0 - ty) + v1 * ty).clamp(0.0, 1.0)
+    }
+
+    #[inline]
+    fn sample_coverage_nearest(coverage: &[u8], width: usize, height: usize, x: f64, y: f64) -> f64 {
+        let xi = x.round() as isize;
+        let yi = y.round() as isize;
+        Self::coverage_value_at(coverage, width, height, xi, yi)
+    }
+
+    #[inline]
+    fn line_height(&self) -> f64 {
+        self.font_size.max(1) as f64
+    }
+
+    fn text_lines<'a>(text: &'a str) -> Vec<&'a str> {
+        text.split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line))
+            .collect()
+    }
+
+    fn draw_cached_text_run(
+        &self,
+        buf: &mut Vec<u8>,
+        text_run: &CachedTextRun,
+        x: f64,
+        y: f64,
+        style: &Style,
+    ) {
+        match style {
+            Style::Color(color) => {
+                for dst_y in 0..text_run.height {
+                    for dst_x in 0..text_run.width {
+                        let alpha = text_run.coverage[dst_y * text_run.width + dst_x];
+                        if alpha == 0 {
+                            continue;
+                        }
+
+                        render::put_pixel_color_coverage_u8(
+                            buf,
+                            self.width,
+                            self.height,
+                            x as i64 + dst_x as i64,
+                            y as i64 + dst_y as i64,
+                            *color,
+                            alpha,
+                            &self.clip,
+                        );
+                    }
+                }
+            }
+            _ => {
+                for dst_y in 0..text_run.height {
+                    for dst_x in 0..text_run.width {
+                        let alpha = text_run.coverage[dst_y * text_run.width + dst_x];
+                        if alpha == 0 {
+                            continue;
+                        }
+
+                        render::put_pixel_style_coverage(
+                            buf,
+                            self.width,
+                            self.height,
+                            x as i64 + dst_x as i64,
+                            y as i64 + dst_y as i64,
+                            style,
+                            alpha as f64 / 255.0,
+                            &self.clip,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw_scaled_cached_text_run(
+        &self,
+        buf: &mut Vec<u8>,
+        text_run: &CachedTextRun,
+        x: f64,
+        y: f64,
+        scale: f64,
+        style: &Style,
+    ) {
+        if text_run.width == 0 || text_run.height == 0 || scale <= 0.0 {
+            return;
+        }
+
+        let scaled_height = (text_run.height as f64 * scale).ceil() as usize;
+        let scaled_width = (text_run.width as f64 * scale).ceil() as usize;
+        for dst_y in 0..scaled_height {
+            for dst_x in 0..scaled_width {
+                let grid = self.text_aa_grid;
+                let coverage = if grid <= 1 {
+                    let sample_x = dst_x as f64 / scale;
+                    let sample_y = dst_y as f64 / scale;
+                    Self::sample_coverage_nearest(&text_run.coverage, text_run.width, text_run.height, sample_x, sample_y)
+                } else {
+                    let mut accum = 0.0;
+                    let total_samples = grid * grid;
+                    for sy in 0..grid {
+                        for sx in 0..grid {
+                            let sample_x = ((dst_x as f64 + (sx as f64 + 0.5) / grid as f64) + 0.5) / scale - 0.5;
+                            let sample_y = ((dst_y as f64 + (sy as f64 + 0.5) / grid as f64) + 0.5) / scale - 0.5;
+                            accum += Self::sample_coverage_bilinear(
+                                &text_run.coverage,
+                                text_run.width,
+                                text_run.height,
+                                sample_x,
+                                sample_y,
+                            );
+                        }
+                    }
+                    (accum / total_samples as f64).clamp(0.0, 1.0)
+                };
+
+                if coverage > 0.0 {
+                    render::put_pixel_style_coverage(
+                        buf,
+                        self.width,
+                        self.height,
+                        x as i64 + dst_x as i64,
+                        y as i64 + dst_y as i64,
+                        style,
+                        coverage,
+                        &self.clip,
+                    );
+                }
+            }
+        }
     }
 
     fn get_cached_glyph(
@@ -828,57 +979,24 @@ impl Context2D {
         }
 
         let primary_font = primary_font.unwrap();
-        let text_run = self.get_cached_text_run(primary_font, text);
-        let x_offset = x - self.text_align.calculate_x_offset(text_run.width as f64);
+        let lines = Self::text_lines(text);
+        let line_height = self.line_height();
 
         let mut buf = self.buffer.borrow_mut();
-        match self.fill_style.clone() {
-            Style::Color(color) => {
-                for dst_y in 0..text_run.height {
-                    for dst_x in 0..text_run.width {
-                        let alpha = text_run.coverage[dst_y * text_run.width + dst_x];
-                        if alpha == 0 {
-                            continue;
-                        }
-
-                        let px = x_offset as i64 + dst_x as i64;
-                        let py = y as i64 + dst_y as i64;
-                        render::put_pixel_color_coverage_u8(
-                            &mut buf,
-                            self.width,
-                            self.height,
-                            px,
-                            py,
-                            color,
-                            alpha,
-                            &self.clip,
-                        );
-                    }
-                }
+        let style = self.fill_style.clone();
+        for (index, line) in lines.iter().enumerate() {
+            if line.is_empty() {
+                continue;
             }
-            style => {
-                for dst_y in 0..text_run.height {
-                    for dst_x in 0..text_run.width {
-                        let alpha = text_run.coverage[dst_y * text_run.width + dst_x];
-                        if alpha == 0 {
-                            continue;
-                        }
 
-                        let px = x_offset as i64 + dst_x as i64;
-                        let py = y as i64 + dst_y as i64;
-                        render::put_pixel_style_coverage(
-                            &mut buf,
-                            self.width,
-                            self.height,
-                            px,
-                            py,
-                            &style,
-                            alpha as f64 / 255.0,
-                            &self.clip,
-                        );
-                    }
-                }
+            let text_run = self.get_cached_text_run(primary_font, line);
+            if text_run.width == 0 || text_run.height == 0 {
+                continue;
             }
+
+            let x_offset = x - self.text_align.calculate_x_offset(text_run.width as f64);
+            let y_offset = y + index as f64 * line_height;
+            self.draw_cached_text_run(&mut buf, &text_run, x_offset, y_offset, &style);
         }
     }
 
@@ -904,77 +1022,42 @@ impl Context2D {
         }
 
         let primary_font = primary_font.unwrap();
-        let text_run = self.get_cached_text_run(primary_font, text);
-        if text_run.width == 0 {
+        let lines = Self::text_lines(text);
+        let mut line_runs = Vec::with_capacity(lines.len());
+        let mut widest_width = 0usize;
+        for line in &lines {
+            if line.is_empty() {
+                line_runs.push(None);
+                continue;
+            }
+
+            let text_run = self.get_cached_text_run(primary_font, line);
+            widest_width = widest_width.max(text_run.width);
+            line_runs.push(Some(text_run));
+        }
+
+        if widest_width == 0 {
             return;
         }
-        if text_run.width as f64 <= max_width {
+        if widest_width as f64 <= max_width {
             self.fill_text(text, x, y);
             return;
         }
 
-        let (bitmap, original_width, _) = primary_font.render_text_with_fallback(
-            text,
-            self.font_size,
-            self.common_font.as_ref(),
-        );
-
-        if bitmap.is_empty() || original_width == 0 {
-            return;
-        }
-
-        // Calculate scale factor if text exceeds max_width
-        let scale = if original_width as f64 > max_width {
-            max_width / original_width as f64
-        } else {
-            1.0
-        };
-
+        let scale = max_width / widest_width as f64;
         let style = self.fill_style.clone();
-        let scaled_height = (bitmap.len() as f64 * scale).ceil() as usize;
-        let scaled_width = (bitmap[0].len() as f64 * scale).ceil() as usize;
-        let scaled_width_f64 = scaled_width as f64;
+        let line_height = self.line_height() * scale;
 
-        // Apply textAlign offset
-        let x_offset = x - self.text_align.calculate_x_offset(scaled_width_f64);
-
-        // Draw scaled text
         let mut buf = self.buffer.borrow_mut();
-        for dst_y in 0..scaled_height {
-            for dst_x in 0..scaled_width {
-                let grid = self.text_aa_grid;
-                let coverage = if grid <= 1 {
-                    let sample_x = dst_x as f64 / scale;
-                    let sample_y = dst_y as f64 / scale;
-                    Self::sample_bitmap_nearest(&bitmap, sample_x, sample_y)
-                } else {
-                    let mut accum = 0.0;
-                    let total_samples = grid * grid;
-                    for sy in 0..grid {
-                        for sx in 0..grid {
-                            let sample_x = ((dst_x as f64 + (sx as f64 + 0.5) / grid as f64) + 0.5) / scale - 0.5;
-                            let sample_y = ((dst_y as f64 + (sy as f64 + 0.5) / grid as f64) + 0.5) / scale - 0.5;
-                            accum += Self::sample_bitmap_bilinear(&bitmap, sample_x, sample_y);
-                        }
-                    }
-                    (accum / total_samples as f64).clamp(0.0, 1.0)
-                };
+        for (index, text_run) in line_runs.iter().enumerate() {
+            let Some(text_run) = text_run else {
+                continue;
+            };
 
-                if coverage > 0.0 {
-                    let px = x_offset as i64 + dst_x as i64;
-                    let py = y as i64 + dst_y as i64;
-                    render::put_pixel_style_coverage(
-                        &mut buf,
-                        self.width,
-                        self.height,
-                        px,
-                        py,
-                        &style,
-                        coverage,
-                        &self.clip,
-                    );
-                }
-            }
+            let scaled_width = (text_run.width as f64 * scale).ceil() as usize;
+            let x_offset = x - self.text_align.calculate_x_offset(scaled_width as f64);
+            let y_offset = y + index as f64 * line_height;
+            self.draw_scaled_cached_text_run(&mut buf, text_run, x_offset, y_offset, scale, &style);
         }
     }
 
@@ -982,18 +1065,22 @@ impl Context2D {
     /// Returns the width in pixels.
     /// Characters not found in the font will fallback to common font.
     pub fn measure_text(&self, text: &str) -> f64 {
-        // Need to temporarily load font for measurement
         let font = load_cached_font(&self.font_family);
         let common_font = load_cached_font("common");
 
         let primary_font = font.as_ref().or(common_font.as_ref());
         if let Some(font) = primary_font {
-            let (_, width, _) = font.render_text_with_fallback(
-                text,
-                self.font_size,
-                common_font.as_ref(),
-            );
-            width as f64
+            Self::text_lines(text)
+                .into_iter()
+                .map(|line| {
+                    let (_, width, _) = font.render_text_with_fallback(
+                        line,
+                        self.font_size,
+                        common_font.as_ref(),
+                    );
+                    width as f64
+                })
+                .fold(0.0, f64::max)
         } else {
             0.0
         }
@@ -1244,5 +1331,14 @@ mod tests {
         let run = ctx.get_cached_text_run(primary_font, "A A");
 
         assert_eq!(run.width as f64, ctx.measure_text("A A"));
+    }
+
+    #[test]
+    fn measure_text_uses_widest_line_for_multiline_text() {
+        let canvas = Canvas::new(64, 64);
+        let mut ctx = canvas.get_context("2d").unwrap();
+        ctx.set_font("20px common");
+
+        assert_eq!(ctx.measure_text("AB\nABCD"), ctx.measure_text("ABCD"));
     }
 }
