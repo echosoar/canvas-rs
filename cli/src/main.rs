@@ -24,6 +24,8 @@ fn print_usage() {
     println!("  draw_image <path> <dx> <dy>                                       - Draw an image at (dx, dy) at natural size");
     println!("  draw_image <path> <dx> <dy> <dw> <dh>                            - Draw an image scaled to (dw, dh)");
     println!("  draw_image <path> <sx> <sy> <sw> <sh> <dx> <dy> <dw> <dh>       - Draw a sub-region of an image scaled to (dw, dh)");
+    println!("  draw_svg <path> <dx> <dy>                                         - Draw an SVG at (dx, dy) at its intrinsic size");
+    println!("  draw_svg <path> <dx> <dy> <dw> <dh>                              - Draw an SVG scaled to (dw, dh)");
     println!("  set_fill_style <color>            - Set fill style (e.g., red, #ff0000, rgb(255,0,0))");
     println!("  set_stroke_style <color>          - Set stroke style");
     println!("  set_font <size>px <family>        - Set font (e.g., 32px common)");
@@ -235,6 +237,36 @@ fn execute_commands(ctx: &mut canvas::Context2D, commands: &[String], base_path:
                         }
                     } else {
                         eprintln!("Warning: Failed to read image: {}", image_path);
+                    }
+                }
+            }
+            "draw_svg" => {
+                // Supported forms:
+                //   draw_svg <path> <dx> <dy>
+                //   draw_svg <path> <dx> <dy> <dw> <dh>
+                if parts.len() >= 4 {
+                    let svg_path = parts[1];
+
+                    // Resolve path relative to input file
+                    let resolved = if Path::new(svg_path).is_absolute() {
+                        svg_path.to_string()
+                    } else {
+                        base_path.join(svg_path).to_string_lossy().to_string()
+                    };
+
+                    match fs::read(&resolved) {
+                        Ok(svg_bytes) => {
+                            let dx = parse_float(parts[2]);
+                            let dy = parse_float(parts[3]);
+                            let dw = if parts.len() >= 5 { parse_u32(parts[4]) } else { 0 };
+                            let dh = if parts.len() >= 6 { parse_u32(parts[5]) } else { 0 };
+                            if !canvas::draw_svg(ctx, &svg_bytes, dx, dy, dw, dh) {
+                                eprintln!("Warning: Failed to render SVG: {}", resolved);
+                            }
+                        }
+                        Err(_) => {
+                            eprintln!("Warning: Failed to read SVG file: {}", resolved);
+                        }
                     }
                 }
             }
