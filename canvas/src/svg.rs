@@ -565,7 +565,10 @@ impl SvgStyle {
     /// Inherit styles from `parent`, then apply values from `element`.
     fn inherit_and_apply(parent: &SvgStyle, element: &XmlElement) -> SvgStyle {
         let mut s = parent.clone();
-        s.opacity = 1.0; // opacity is not inherited, reset to 1
+        // `opacity` is applied per-element and not propagated to children as an
+        // inherited value; reset it to 1.0 so each element starts with full
+        // opacity (its own `opacity` attribute is parsed below).
+        s.opacity = 1.0;
 
         // Parse inline style="" attribute first for lower precedence
         if let Some(style_str) = element.attr("style") {
@@ -1146,14 +1149,15 @@ fn flatten_arc(
     // Ensure radii are large enough
     let x1p2 = x1p * x1p;
     let y1p2 = y1p * y1p;
-    let rx2 = rx * rx;
-    let ry2 = ry * ry;
-    let lambda = x1p2 / rx2 + y1p2 / ry2;
+    let rx2_init = rx * rx;
+    let ry2_init = ry * ry;
+    let lambda = x1p2 / rx2_init + y1p2 / ry2_init;
     if lambda > 1.0 {
         let lambda_sqrt = lambda.sqrt();
         rx *= lambda_sqrt;
         ry *= lambda_sqrt;
     }
+    // Recompute squared radii after possible adjustment
     let rx2 = rx * rx;
     let ry2 = ry * ry;
 
