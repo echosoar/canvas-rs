@@ -31,6 +31,7 @@ pub mod gradient;
 pub mod image;
 pub mod path;
 pub mod render;
+pub mod svg;
 
 pub use crate::canvas::{Canvas, Context2D};
 pub use crate::color::Color;
@@ -38,3 +39,4 @@ pub use crate::font::{Font, FontConfig, FontWidth};
 pub use crate::gradient::{LinearGradient, RadialGradient, Style};
 pub use crate::image::ImageData;
 pub use crate::render::{LineCap, TextAlign};
+pub use crate::svg::{draw_svg, render_svg, render_svg_str};

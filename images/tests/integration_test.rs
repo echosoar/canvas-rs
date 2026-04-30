@@ -715,3 +715,130 @@ fn fill_text_with_newlines_renders_as_multiple_lines() {
 
     assert_eq!(multiline_canvas.get_image_data().data, manual_canvas.get_image_data().data);
 }
+
+// ── SVG tests ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn svg_render_rect_fills_expected_pixels() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <rect x="0" y="0" width="100" height="100" fill="red"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    assert_eq!(img.width, 100);
+    assert_eq!(img.height, 100);
+    let px = img.get_pixel(50, 50);
+    assert!(px.r > 200 && px.g < 50 && px.b < 50, "center pixel should be red, got {:?}", px);
+}
+
+#[test]
+fn svg_render_circle_center_is_filled() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <circle cx="50" cy="50" r="40" fill="blue"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    let center = img.get_pixel(50, 50);
+    assert!(center.b > 200 && center.r < 50, "center should be blue, got {:?}", center);
+    // Corner should be transparent (outside circle)
+    let corner = img.get_pixel(0, 0);
+    assert_eq!(corner.a, 0, "corner should be transparent, got {:?}", corner);
+}
+
+#[test]
+fn svg_render_path_triangle() {
+    // Isoceles triangle: top-center, bottom-left, bottom-right
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <path d="M 50 10 L 90 90 L 10 90 Z" fill="green"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    // Center of the triangle should be green
+    let center = img.get_pixel(50, 60);
+    assert!(center.g > 100, "triangle interior should be green, got {:?}", center);
+}
+
+#[test]
+fn svg_render_viewbox_scales_correctly() {
+    // SVG with viewBox 0 0 50 50 rendered at 100x100: everything should be doubled
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+        <rect x="0" y="0" width="50" height="50" fill="green"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    assert_eq!(img.width, 100);
+    assert_eq!(img.height, 100);
+    let px = img.get_pixel(50, 50);
+    assert!(px.g > 100, "pixel should be green after viewBox scaling, got {:?}", px);
+}
+
+#[test]
+fn svg_render_group_inherits_style() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <g fill="red">
+            <rect x="10" y="10" width="30" height="30"/>
+        </g>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    let px = img.get_pixel(25, 25);
+    assert!(px.r > 200 && px.g < 50, "rect inside group should inherit red fill, got {:?}", px);
+}
+
+#[test]
+fn svg_render_stroke_only_element() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <line x1="0" y1="50" x2="100" y2="50" stroke="red" stroke-width="4"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    let on_line = img.get_pixel(50, 50);
+    assert!(on_line.r > 200, "pixel on line should be red, got {:?}", on_line);
+}
+
+#[test]
+fn svg_render_ellipse() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60">
+        <ellipse cx="50" cy="30" rx="40" ry="20" fill="purple"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 60).expect("should render SVG");
+    let center = img.get_pixel(50, 30);
+    assert!(center.r > 100 && center.b > 100, "center should be purple-ish, got {:?}", center);
+}
+
+#[test]
+fn svg_render_polygon() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <polygon points="50,10 90,90 10,90" fill="orange"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 100, 100).expect("should render SVG");
+    // Center of the triangle should have some orange-ish color (high R, medium G, low B)
+    let center = img.get_pixel(50, 60);
+    assert!(center.r > 200 && center.b < 50, "polygon center should be orange, got {:?}", center);
+}
+
+#[test]
+fn svg_draw_svg_onto_context() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">
+        <rect x="0" y="0" width="50" height="50" fill="cyan"/>
+    </svg>"#;
+    let canvas = Canvas::new(100, 100);
+    let mut ctx = canvas.get_context("2d").unwrap();
+    let result = canvas::draw_svg(&mut ctx, svg.as_bytes(), 25.0, 25.0, 50, 50);
+    assert!(result, "draw_svg should succeed");
+    let img = canvas.get_image_data();
+    // The drawn SVG starts at (25, 25) so pixel at (50, 50) should be cyan
+    let px = img.get_pixel(50, 50);
+    assert!(px.g > 200 && px.b > 200, "pixel should be cyan, got {:?}", px);
+    // Pixel at (10, 10) is outside the drawn SVG and should be transparent
+    let outside = img.get_pixel(10, 10);
+    assert_eq!(outside.a, 0, "pixel outside SVG should be transparent, got {:?}", outside);
+}
+
+#[test]
+fn svg_render_opacity() {
+    // A fully-opaque white background plus a semi-transparent red rect on top
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">
+        <rect x="0" y="0" width="50" height="50" fill="white"/>
+        <rect x="0" y="0" width="50" height="50" fill="red" opacity="0.5"/>
+    </svg>"#;
+    let img = canvas::render_svg(svg.as_bytes(), 50, 50).expect("should render SVG");
+    let px = img.get_pixel(25, 25);
+    // Should be a blend of red and white (pink-ish)
+    assert!(px.r > 200 && px.g > 100, "blended color should be pink-ish, got {:?}", px);
+}
+
